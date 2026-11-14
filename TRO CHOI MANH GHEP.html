@@ -1,0 +1,3376 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Trò Chơi Giáo Dục: Lật Mở Mảnh Ghép</title>
+    <!-- Nhúng Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Nhúng Google Fonts: Be Vietnam Pro & Inter để hiển thị tiếng Việt sắc nét khi trình chiếu -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@500;600;700;800;900&display=swap" rel="stylesheet">
+    <!-- Nhúng thư viện JSZip & Mammoth.js hỗ trợ đọc chính xác nội dung + màu sắc/định dạng từ file Word (.docx) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+    
+    <style>
+        body {
+            font-family: 'Be Vietnam Pro', sans-serif;
+            background: linear-gradient(135deg, #f0f4ff 0%, #e0e7ff 100%);
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        /* Hiệu ứng 3D cho từng mảnh ghép */
+        .tile-container {
+            perspective: 1000px;
+        }
+
+        .tile-inner {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            transition: transform 0.8s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.6s ease;
+            transform-style: preserve-3d;
+        }
+
+        /* Khi mảnh ghép được mở: lật 180 độ và mờ dần để lộ rõ tranh bên dưới */
+        .tile-container.revealed .tile-inner {
+            transform: rotateY(180deg) scale(0.95);
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .tile-front {
+            backface-visibility: hidden;
+            box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.35), 0 4px 10px rgba(0, 0, 0, 0.15);
+            transition: all 0.25s ease;
+        }
+
+        .tile-container:not(.revealed):hover .tile-front {
+            transform: scale(0.97);
+            filter: brightness(1.08);
+            box-shadow: inset 0 0 0 3px rgba(255, 255, 255, 0.8), 0 8px 20px rgba(0, 0, 0, 0.25);
+        }
+
+        /* Hiệu ứng rung khi chọn đáp án sai */
+        @keyframes shake {
+            0%, 100% { transform: translateX(0); }
+            20%, 60% { transform: translateX(-8px); }
+            40%, 80% { transform: translateX(8px); }
+        }
+
+        .animate-shake {
+            animation: shake 0.45s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+        }
+
+        /* Hiệu ứng phóng to nhẹ khi xuất hiện Modal */
+        @keyframes modalPop {
+            0% { opacity: 0; transform: scale(0.92) translateY(10px); }
+            100% { opacity: 1; transform: scale(1) translateY(0); }
+        }
+
+        .animate-modal {
+            animation: modalPop 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+
+        /* Tùy chỉnh thanh cuộn trong modal chỉnh sửa */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f5f9;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #94a3b8;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #64748b;
+        }
+    </style>
+</head>
+<body class="text-slate-800 flex flex-col justify-between">
+
+    <!-- Canvas hiệu ứng pháo giấy chúc mừng -->
+    <canvas id="confetti-canvas" class="fixed inset-0 pointer-events-none z-50"></canvas>
+
+    <!-- ===================================================================== -->
+    <!-- MÀN HÌNH ĐĂNG NHẬP / CHỌN VAI TRÒ (HỌC SINH & GIÁO VIÊN)              -->
+    <!-- ===================================================================== -->
+    <div id="role-login-screen" class="fixed inset-0 z-50 bg-gradient-to-br from-indigo-950 via-blue-900 to-teal-900 flex items-center justify-center p-4 overflow-y-auto">
+        <div class="bg-white w-full max-w-xl rounded-3xl shadow-2xl overflow-hidden border-2 border-indigo-200 animate-modal my-auto">
+            <!-- Header thương hiệu trò chơi -->
+            <div class="bg-gradient-to-r from-indigo-600 to-blue-600 text-white p-6 text-center relative overflow-hidden">
+                <div class="absolute -top-10 -right-10 w-32 h-32 bg-white/10 rounded-full"></div>
+                <div class="absolute -bottom-10 -left-10 w-28 h-28 bg-white/10 rounded-full"></div>
+                <span class="inline-block bg-amber-400 text-indigo-950 font-black text-xs uppercase tracking-widest px-3 py-1 rounded-full mb-2 shadow-sm">
+                    Hóa học 11 • Hợp chất hữu cơ
+                </span>
+                <h1 class="text-2xl sm:text-3xl font-black uppercase tracking-tight">
+                    Chinh Phục Hợp Chất Hữu Cơ
+                </h1>
+                <p class="text-indigo-100 text-sm mt-1 font-medium">
+                    Hệ thống tương tác thời gian thực giữa Học sinh & Giáo viên
+                </p>
+            </div>
+
+            <!-- Thanh chuyển Tab: Học sinh / Giáo viên -->
+            <div class="grid grid-cols-2 border-b border-slate-200 bg-slate-50 font-bold text-sm sm:text-base">
+                <button id="tab-student-btn" type="button" class="py-3.5 px-4 text-indigo-700 bg-white border-b-4 border-indigo-600 flex items-center justify-center gap-2 transition">
+                    <span>🎓 Học sinh tham gia</span>
+                </button>
+                <button id="tab-teacher-btn" type="button" class="py-3.5 px-4 text-slate-500 hover:text-slate-800 flex items-center justify-center gap-2 transition">
+                    <span>👩‍🏫 Giáo viên quản lý</span>
+                </button>
+            </div>
+
+            <!-- NỘI DUNG TAB 1: HỌC SINH ĐĂNG NHẬP -->
+            <form id="student-login-form" class="p-6 sm:p-8 space-y-5">
+                <div>
+                    <label class="block text-sm font-bold text-slate-700 mb-1.5">Họ và tên học sinh <span class="text-rose-500">*</span></label>
+                    <input type="text" id="student-name-input" required placeholder="Ví dụ: Nguyễn Văn An"
+                        class="w-full px-4 py-3 rounded-xl border-2 border-slate-200 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100 outline-none font-semibold text-slate-800 text-base transition">
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-bold text-slate-700 mb-1.5">Lớp / Nhóm <span class="text-rose-500">*</span></label>
+                        <select id="student-group-select" class="w-full px-4 py-3 rounded-xl border-2 border-slate-200 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100 outline-none font-semibold text-slate-800 bg-white">
+                            <option value="Nhóm 1">Nhóm 1</option>
+                            <option value="Nhóm 2">Nhóm 2</option>
+                            <option value="Nhóm 3">Nhóm 3</option>
+                            <option value="Nhóm 4">Nhóm 4</option>
+                            <option value="Nhóm 5">Nhóm 5</option>
+                            <option value="Nhóm 6">Nhóm 6</option>
+                            <option value="11A1">Lớp 11A1</option>
+                            <option value="11A2">Lớp 11A2</option>
+                            <option value="11A3">Lớp 11A3</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-bold text-slate-700 mb-1.5">Mã phòng học <span class="text-rose-500">*</span></label>
+                        <input type="text" id="student-room-input" required value="HOA11" uppercase
+                            class="w-full px-4 py-3 rounded-xl border-2 border-indigo-200 bg-indigo-50/50 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100 outline-none font-black text-indigo-800 uppercase tracking-wider text-center">
+                    </div>
+                </div>
+
+                <div id="login-error-box" class="hidden bg-rose-50 border border-rose-200 text-rose-700 text-sm font-semibold px-4 py-3 rounded-xl"></div>
+
+                <button type="submit" id="btn-student-start" class="w-full bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-700 hover:to-blue-700 active:scale-[0.99] text-white font-black text-lg py-3.5 rounded-2xl shadow-lg shadow-indigo-200 transition flex items-center justify-center gap-2">
+                    <span>🚀 Vào chơi ngay</span>
+                </button>
+            </form>
+
+            <!-- NỘI DUNG TAB 2: GIÁO VIÊN QUẢN LÝ -->
+            <div id="teacher-login-panel" class="hidden p-6 sm:p-8 space-y-5">
+                <!-- Khung xác thực mật khẩu giáo viên -->
+                <div id="teacher-password-gate" class="bg-slate-50 border-2 border-indigo-200 rounded-2xl p-5 space-y-3.5">
+                    <div class="flex items-center justify-between">
+                        <label for="teacher-password-input" class="text-sm font-extrabold text-slate-800 flex items-center gap-1.5">
+                            <span>🔐 Mật khẩu Giáo viên</span>
+                        </label>
+                        <span class="text-[11px] font-semibold text-slate-500 bg-white px-2.5 py-0.5 rounded-full border border-slate-200">
+                            Mặc định: <strong class="text-indigo-700">GV2011</strong>
+                        </span>
+                    </div>
+                    <div class="flex gap-2">
+                        <input type="password" id="teacher-password-input" placeholder="Nhập mật khẩu để mở khóa..."
+                            class="flex-1 px-4 py-2.5 rounded-xl border-2 border-slate-200 focus:border-indigo-500 focus:ring-4 focus:ring-indigo-100 outline-none font-bold text-slate-800 text-sm transition">
+                        <button type="button" id="btn-unlock-teacher" class="bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white font-extrabold px-4 py-2.5 rounded-xl text-sm shadow transition shrink-0">
+                            🔓 Mở khóa
+                        </button>
+                    </div>
+                    <p id="teacher-pass-error" class="hidden text-xs font-bold text-rose-600">
+                        ❌ Mật khẩu không chính xác! Vui lòng kiểm tra lại.
+                    </p>
+                </div>
+
+                <!-- Khu vực điều khiển sau khi giáo viên nhập đúng mật khẩu -->
+                <div id="teacher-unlocked-controls" class="hidden space-y-4">
+                    <div class="bg-amber-50 border-2 border-amber-200 rounded-2xl p-5 text-center">
+                        <p class="text-xs font-bold uppercase tracking-wider text-amber-800 mb-1">Mã phòng trình chiếu cho học sinh</p>
+                        <div class="flex items-center justify-center gap-3 flex-wrap">
+                            <span id="teacher-room-display" class="text-4xl font-black text-indigo-700 tracking-widest select-all">HOA11</span>
+                            <button type="button" id="btn-copy-room-code" class="bg-white hover:bg-amber-100 text-amber-900 border border-amber-300 px-3 py-1.5 rounded-xl text-xs font-bold shadow-sm transition" title="Sao chép mã phòng">
+                                📋 Sao chép mã
+                            </button>
+                            <button type="button" id="btn-copy-room-link-login" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-xl text-xs font-bold shadow-sm transition" title="Sao chép đường link kèm sẵn mã phòng mới">
+                                🔗 Sao chép Link phòng
+                            </button>
+                        </div>
+                        <p class="text-xs text-slate-600 mt-2">Khi tạo phòng mới, hãy gửi <strong>Link phòng mới</strong> (hoặc đọc mã phòng mới) để học sinh vào đúng phòng.</p>
+                    </div>
+                        <p class="text-xs text-slate-600 mt-2">Học sinh nhập đúng mã phòng này để kết quả hiển thị trực tiếp lên bảng theo dõi.</p>
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <button type="button" id="btn-enter-teacher-dashboard" class="col-span-1 sm:col-span-2 bg-emerald-600 hover:bg-emerald-700 active:scale-[0.99] text-white font-black text-lg py-3.5 rounded-2xl shadow-lg shadow-emerald-200 transition flex items-center justify-center gap-2">
+                            <span>📊 Mở Bảng Theo Dõi Trực Tiếp (Dashboard)</span>
+                        </button>
+                        <button type="button" id="btn-enter-teacher-board" class="col-span-1 sm:col-span-2 bg-indigo-100 hover:bg-indigo-200 text-indigo-900 font-bold text-sm py-3 rounded-xl transition flex items-center justify-center gap-2">
+                            <span>🖥️ Vào màn hình Lật mảnh ghép (Chiếu lớp)</span>
+                        </button>
+                    </div>
+
+                    <!-- Tùy chọn đổi mật khẩu mới cho giáo viên -->
+                    <div class="pt-2 border-t border-slate-200 flex flex-wrap items-center justify-between gap-2 text-xs">
+                        <span class="text-emerald-700 font-bold">✅ Đã xác thực quyền Giáo viên</span>
+                        <button type="button" id="btn-toggle-change-pass" class="text-indigo-600 hover:underline font-bold">
+                            🔑 Đổi mật khẩu quản lý
+                        </button>
+                    </div>
+                    <div id="change-teacher-pass-box" class="hidden bg-slate-50 p-3 rounded-xl border border-slate-200 flex gap-2">
+                        <input type="text" id="new-teacher-pass-input" placeholder="Nhập mật khẩu mới..."
+                            class="flex-1 px-3 py-1.5 rounded-lg border border-slate-300 text-xs font-bold outline-none focus:border-indigo-500">
+                        <button type="button" id="btn-save-new-pass" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3 py-1.5 rounded-lg text-xs">
+                            Lưu
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- THANH CÔNG CỤ (HEADER) -->
+    <header class="bg-white/90 backdrop-blur-md shadow-sm border-b border-indigo-100 sticky top-0 z-30">
+        <div class="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+            <!-- Tiêu đề trò chơi & Thông tin người chơi -->
+            <div class="flex items-center gap-3">
+                <div class="bg-indigo-600 text-white p-2.5 rounded-xl shadow-md">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-7 w-7" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M11 4a2 2 0 114 0v1a1 1 0 001 1h3a1 1 0 011 1v3a1 1 0 01-1 1h-1a2 2 0 100 4h1a1 1 0 011 1v3a1 1 0 01-1 1h-3a1 1 0 01-1-1v-1a2 2 0 10-4 0v1a1 1 0 01-1 1H7a1 1 0 01-1-1v-3a1 1 0 00-1-1H4a2 2 0 110-4h1a1 1 0 001-1V7a1 1 0 011-1h3a1 1 0 001-1V4z" />
+                    </svg>
+                </div>
+                <div>
+                    <div class="flex items-center gap-2 flex-wrap">
+                        <h1 class="text-lg sm:text-2xl font-extrabold text-indigo-950 tracking-tight uppercase">
+                            Lật Mở Mảnh Ghép
+                        </h1>
+                        <span id="header-room-badge" class="bg-indigo-100 text-indigo-800 text-xs font-black px-2.5 py-0.5 rounded-lg">
+                            Phòng: HOA11
+                        </span>
+                        <span id="header-round-badge" class="bg-emerald-100 text-emerald-900 border border-emerald-300 text-xs font-black px-2.5 py-0.5 rounded-lg flex items-center gap-1" title="Học sinh chủ động tham gia không giới hạn thời gian phòng">
+                            <span>🎯 Đợt <strong id="header-round-num">1</strong> • Tự do</span>
+                        </span>
+                    </div>
+                    <!-- Thanh trạng thái dành cho Học sinh -->
+                    <div id="student-status-bar" class="text-xs sm:text-sm text-slate-600 font-medium flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-0.5">
+                        <span>👤 <strong id="display-student-name" class="text-slate-900">Khách</strong> (<span id="display-student-group">Nhóm 1</span>)</span>
+                        <span>•</span>
+                        <span>Đã mở: <strong id="opened-count" class="text-indigo-600">0</strong>/15</span>
+                        <span>•</span>
+                        <span>Điểm: <strong id="student-score-display" class="text-emerald-600 font-black">0</strong></span>
+                        <span>•</span>
+                        <span>⏱️ <strong id="student-timer-display" class="font-mono text-slate-800">00:00.0s</strong></span>
+                        <span id="student-server-sync-badge" class="hidden bg-emerald-100 text-emerald-800 border border-emerald-300 px-2 py-0.5 rounded-full text-[11px] font-extrabold items-center gap-1">
+                            <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                            <span>📡 Đã nối máy chủ GV</span>
+                        </span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Các nút điều khiển -->
+            <div class="flex flex-wrap items-center gap-2">
+                <!-- Nút mở Bảng Vàng Tổng Kết Top 3 -->
+                <button id="btn-open-top3" class="bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 active:scale-95 text-white font-bold px-3.5 py-2 rounded-xl shadow-sm transition flex items-center gap-1.5 text-sm">
+                    <span>🏆 Vinh danh Top 3</span>
+                </button>
+
+                <!-- Nút mở Bảng theo dõi Giáo viên (Luôn hiện cho Giáo viên, hoặc hiện nút chuyển vai trò) -->
+                <button id="btn-open-dashboard" class="bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold px-3.5 py-2 rounded-xl shadow-sm transition flex items-center gap-2 text-sm">
+                    <span>📊 Bảng kiểm soát GV</span>
+                    <span id="online-students-badge" class="bg-white text-emerald-700 font-black text-xs px-2 py-0.5 rounded-full">0</span>
+                </button>
+
+                <!-- Nhóm nút dành riêng cho Giáo viên -->
+                <div id="teacher-toolbar-group" class="flex flex-wrap items-center gap-2">
+                    <!-- Nút Chọn ảnh bí mật -->
+                    <label for="upload-bg-input" class="cursor-pointer bg-amber-500 hover:bg-amber-600 active:scale-95 text-white font-semibold px-3.5 py-2 rounded-xl shadow-sm transition flex items-center gap-2 text-sm">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                        </svg>
+                        <span>Chọn & Lưu ảnh bí mật</span>
+                    </label>
+                    <input type="file" id="upload-bg-input" accept="image/*" class="hidden">
+
+                    <!-- Nút Khôi phục ảnh mặc định 20/11 (hiện khi đang dùng ảnh tùy chỉnh) -->
+                    <button id="btn-reset-bg-image" class="hidden bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 font-semibold px-3 py-2 rounded-xl shadow-sm transition text-sm" title="Quay lại tranh minh họa 20/11 mặc định">
+                        ↩️ Ảnh mặc định
+                    </button>
+
+                    <!-- Nút Chỉnh sửa 15 câu hỏi / Nạp từ file Word -->
+                    <button id="btn-edit-questions" class="bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white font-semibold px-3.5 py-2 rounded-xl shadow-sm transition flex items-center gap-2 text-sm">
+                        <span>⚙️ Sửa câu hỏi</span>
+                    </button>
+
+                    <!-- Nút Mở toàn bộ tranh -->
+                    <button id="btn-reveal-all" class="bg-sky-600 hover:bg-sky-700 active:scale-95 text-white font-semibold px-3.5 py-2 rounded-xl shadow-sm transition flex items-center gap-2 text-sm">
+                        <span>👁️ Mở hết tranh</span>
+                    </button>
+
+                    <!-- Nút Chơi lại -->
+                    <button id="btn-reset-game" class="bg-slate-700 hover:bg-slate-800 active:scale-95 text-white font-semibold px-3.5 py-2 rounded-xl shadow-sm transition flex items-center gap-2 text-sm">
+                        <span>🔄 Đóng ô</span>
+                    </button>
+
+                    <!-- Nút Xuất & Lưu trọn gói trò chơi (kèm câu hỏi mới + bức tranh bí mật) -->
+                    <button id="btn-export-game-bundle" class="bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold px-3.5 py-2 rounded-xl shadow-sm transition flex items-center gap-2 text-sm" title="Lưu toàn bộ câu hỏi, tranh bí mật và kết nối thi đấu online thành file index.html">
+                        <span>📲 Lưu bản thi đấu (index.html)</span>
+                    </button>
+                </div>
+
+                <!-- Nút Đăng xuất / Đổi tài khoản -->
+                <button id="btn-switch-role" class="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-semibold px-3 py-2 rounded-xl transition text-sm" title="Quay lại màn hình đăng nhập">
+                    🚪 Đổi vai trò
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- KHU VỰC CHƠI CHÍNH: BỨC TRANH BÍ MẬT & 10 MẢNH GHÉP (5 CỘT x 2 HÀNG) -->
+    <main class="flex-1 flex items-center justify-center p-3 sm:p-6">
+        <div class="w-full max-w-6xl bg-white p-2.5 sm:p-4 rounded-3xl shadow-2xl border-4 border-indigo-200">
+            <!-- Khung tỷ lệ 16:9 chuẩn trình chiếu -->
+            <div id="puzzle-board" class="relative w-full aspect-[16/9] rounded-2xl overflow-hidden bg-slate-900 select-none shadow-inner">
+                
+                <!-- LỚP 1: BỨC TRANH BÍ MẬT NẰM BÊN DƯỚI (CHỦ ĐỀ CHÀO MỪNG NGÀY NHÀ GIÁO VIỆT NAM 20/11) -->
+                <div id="secret-image-container" class="absolute inset-0 w-full h-full flex items-center justify-center bg-amber-50">
+                    <!-- SVG Hình nền minh họa Ngày Nhà giáo Việt Nam 20/11 sắc nét -->
+                    <svg id="default-svg-art" class="w-full h-full object-cover" viewBox="0 0 1200 675" xmlns="http://www.w3.org/2000/svg">
+                        <defs>
+                            <linearGradient id="wallGrad2011" x1="0%" y1="0%" x2="100%" y2="100%">
+                                <stop offset="0%" stop-color="#fef3c7"/>
+                                <stop offset="50%" stop-color="#fde68a"/>
+                                <stop offset="100%" stop-color="#fed7aa"/>
+                            </linearGradient>
+                            <linearGradient id="boardGrad2011" x1="0%" y1="0%" x2="0%" y2="100%">
+                                <stop offset="0%" stop-color="#14532d"/>
+                                <stop offset="100%" stop-color="#064e3b"/>
+                            </linearGradient>
+                        </defs>
+                        <!-- Tường lớp học ấm áp -->
+                        <rect width="1200" height="675" fill="url(#wallGrad2011)"/>
+                        <!-- Ánh nắng cửa sổ bên trái -->
+                        <polygon points="0,0 320,0 520,675 0,675" fill="#ffffff" opacity="0.25"/>
+
+                        <!-- Bảng xanh lớp học ở trung tâm -->
+                        <rect x="200" y="75" width="800" height="340" rx="18" fill="url(#boardGrad2011)" stroke="#92400e" stroke-width="14"/>
+                        <rect x="214" y="89" width="772" height="312" rx="10" fill="none" stroke="#34d399" stroke-width="2" opacity="0.35"/>
+
+                        <!-- Dây cờ trang trí phía trên -->
+                        <path d="M120,45 Q600,115 1080,45" fill="none" stroke="#dc2626" stroke-width="4"/>
+                        <polygon points="240,62 265,66 250,95" fill="#f43f5e"/>
+                        <polygon points="340,74 365,77 350,106" fill="#3b82f6"/>
+                        <polygon points="440,81 465,83 450,112" fill="#f59e0b"/>
+                        <polygon points="585,85 615,85 600,116" fill="#10b981"/>
+                        <polygon points="735,83 760,81 750,112" fill="#8b5cf6"/>
+                        <polygon points="835,77 860,74 850,106" fill="#ec4899"/>
+                        <polygon points="935,66 960,62 950,95" fill="#f59e0b"/>
+
+                        <!-- Hoa phấn vẽ trên bảng -->
+                        <g transform="translate(275, 165)">
+                            <circle cx="0" cy="-22" r="14" fill="#fda4af" opacity="0.85"/>
+                            <circle cx="21" cy="-7" r="14" fill="#fda4af" opacity="0.85"/>
+                            <circle cx="13" cy="18" r="14" fill="#fda4af" opacity="0.85"/>
+                            <circle cx="-13" cy="18" r="14" fill="#fda4af" opacity="0.85"/>
+                            <circle cx="-21" cy="-7" r="14" fill="#fda4af" opacity="0.85"/>
+                            <circle cx="0" cy="0" r="11" fill="#fde047"/>
+                        </g>
+                        <g transform="translate(925, 315)">
+                            <circle cx="0" cy="-22" r="14" fill="#93c5fd" opacity="0.85"/>
+                            <circle cx="21" cy="-7" r="14" fill="#93c5fd" opacity="0.85"/>
+                            <circle cx="13" cy="18" r="14" fill="#93c5fd" opacity="0.85"/>
+                            <circle cx="-13" cy="18" r="14" fill="#93c5fd" opacity="0.85"/>
+                            <circle cx="-21" cy="-7" r="14" fill="#93c5fd" opacity="0.85"/>
+                            <circle cx="0" cy="0" r="11" fill="#fde047"/>
+                        </g>
+
+                        <!-- Chữ phấn trắng & vàng nghệ thuật trên bảng -->
+                        <text x="600" y="175" font-family="Be Vietnam Pro, sans-serif" font-size="42" font-weight="800" fill="#fef08a" text-anchor="middle" letter-spacing="1">
+                            CHÀO MỪNG
+                        </text>
+                        <text x="600" y="242" font-family="Be Vietnam Pro, sans-serif" font-size="52" font-weight="900" fill="#ffffff" text-anchor="middle" letter-spacing="1">
+                            NGÀY NHÀ GIÁO VIỆT NAM
+                        </text>
+                        <text x="600" y="318" font-family="Be Vietnam Pro, sans-serif" font-size="64" font-weight="900" fill="#fde047" text-anchor="middle" letter-spacing="4">
+                            20 / 11
+                        </text>
+                        <text x="600" y="368" font-family="Be Vietnam Pro, sans-serif" font-size="22" font-weight="600" fill="#a7f3d0" text-anchor="middle">
+                            ✨ Tri ân Thầy Cô — Người lái đò thầm lặng ✨
+                        </text>
+
+                        <!-- Bục giảng & Bó hoa hướng dương tri ân ở tiền cảnh -->
+                        <rect x="0" y="545" width="1200" height="130" fill="#b45309"/>
+                        <rect x="0" y="545" width="1200" height="14" fill="#78350f"/>
+
+                        <!-- Quyển sách tri thức mở rộng bên trái -->
+                        <g transform="translate(260, 475)">
+                            <path d="M0,45 Q75,20 150,45 L150,85 Q75,60 0,85 Z" fill="#ffffff" stroke="#cbd5e1" stroke-width="3"/>
+                            <path d="M150,45 Q225,20 300,45 L300,85 Q225,60 150,85 Z" fill="#f8fafc" stroke="#cbd5e1" stroke-width="3"/>
+                            <line x1="150" y1="45" x2="150" y2="85" stroke="#94a3b8" stroke-width="3"/>
+                        </g>
+
+                        <!-- Bó hoa hướng dương rực rỡ ở giữa -->
+                        <g transform="translate(600, 485)">
+                            <!-- Giấy gói hoa -->
+                            <polygon points="-65,-15 65,-15 0,95" fill="#fb7185" stroke="#e11d48" stroke-width="3"/>
+                            <polygon points="-45,-15 45,-15 0,95" fill="#fda4af"/>
+                            <!-- Lá xanh -->
+                            <ellipse cx="-48" cy="-22" rx="22" ry="11" transform="rotate(-30 -48 -22)" fill="#16a34a"/>
+                            <ellipse cx="48" cy="-22" rx="22" ry="11" transform="rotate(30 48 -22)" fill="#16a34a"/>
+                            <!-- 3 Bông hướng dương -->
+                            <g transform="translate(-32, -28)">
+                                <circle cx="0" cy="0" r="24" fill="#facc15"/>
+                                <circle cx="0" cy="0" r="11" fill="#78350f"/>
+                            </g>
+                            <g transform="translate(32, -28)">
+                                <circle cx="0" cy="0" r="24" fill="#facc15"/>
+                                <circle cx="0" cy="0" r="11" fill="#78350f"/>
+                            </g>
+                            <g transform="translate(0, -45)">
+                                <circle cx="0" cy="0" r="28" fill="#eab308"/>
+                                <circle cx="0" cy="0" r="13" fill="#78350f"/>
+                            </g>
+                            <!-- Nơ ruy băng -->
+                            <circle cx="0" cy="25" r="9" fill="#fef08a"/>
+                        </g>
+
+                        <!-- Tấm thiệp tri ân bên phải -->
+                        <g transform="translate(740, 470) rotate(-6)">
+                            <rect x="0" y="0" width="170" height="80" rx="10" fill="#fff1f2" stroke="#f43f5e" stroke-width="3"/>
+                            <text x="85" y="36" font-family="Be Vietnam Pro, sans-serif" font-size="18" font-weight="800" fill="#be123c" text-anchor="middle">
+                                Kính tặng
+                            </text>
+                            <text x="85" y="60" font-family="Be Vietnam Pro, sans-serif" font-size="18" font-weight="800" fill="#be123c" text-anchor="middle">
+                                Thầy Cô ❤️
+                            </text>
+                        </g>
+                    </svg>
+
+                    <!-- Thẻ img hiển thị ảnh giáo viên tải lên (ẩn mặc định) -->
+                    <img id="custom-secret-img" src="" alt="Bức tranh bí mật" class="hidden w-full h-full object-contain bg-slate-900">
+                </div>
+
+                <!-- LỚP 2: LƯỚI 15 MẢNH GHÉP CHE PHỦ (5 CỘT x 3 HÀNG) -->
+                <div id="tiles-grid" class="relative z-10 w-full h-full grid grid-cols-5 grid-rows-3">
+                    <!-- 15 mảnh ghép sẽ được JavaScript sinh tự động tại đây -->
+                </div>
+
+            </div>
+        </div>
+    </main>
+
+    <!-- CHÂN TRANG GỢI Ý NHANH -->
+    <footer class="text-center py-2.5 px-4 text-xs sm:text-sm text-slate-600 font-medium">
+        Mẹo: Nhấp vào từng ô số từ <strong>1 đến 15</strong> để trả lời câu hỏi. Giáo viên bấm <strong>"📊 Bảng kiểm soát GV"</strong> để theo dõi tiến độ từng học sinh theo thời gian thực.
+    </footer>
+
+    <!-- ===================================================================== -->
+    <!-- MODAL 1: HIỂN THỊ CÂU HỎI TRẮC NGHIỆM KHI CLICK VÀO MẢNH GHÉP          -->
+    <!-- ===================================================================== -->
+    <div id="question-modal" class="fixed inset-0 z-40 hidden bg-slate-900/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6">
+        <div class="bg-white w-full max-w-3xl rounded-3xl shadow-2xl overflow-hidden border-2 border-indigo-200 animate-modal">
+            <!-- Header Modal Câu hỏi -->
+            <div class="bg-gradient-to-r from-indigo-600 to-blue-600 text-white px-6 py-4 flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <span id="q-badge-number" class="w-10 h-10 rounded-xl bg-amber-400 text-indigo-950 font-black text-xl flex items-center justify-center shadow">
+                        1
+                    </span>
+                    <h2 class="text-lg sm:text-xl font-extrabold uppercase tracking-wide">
+                        Câu hỏi mảnh ghép số <span id="q-title-number">1</span>
+                    </h2>
+                </div>
+                <button id="btn-close-q-modal" type="button" class="text-white/80 hover:text-white bg-white/15 hover:bg-white/25 rounded-xl p-2 transition" title="Đóng câu hỏi">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            </div>
+
+            <!-- Nội dung câu hỏi & 4 đáp án -->
+            <div class="p-6 sm:p-8 bg-slate-50">
+                <p id="q-text" class="text-xl sm:text-2xl font-extrabold text-slate-900 leading-relaxed mb-6">
+                    Nội dung câu hỏi sẽ hiển thị tại đây...
+                </p>
+
+                <div id="options-container" class="grid grid-cols-1 gap-3.5">
+                    <!-- 4 nút đáp án A, B, C, D sẽ được render tại đây -->
+                </div>
+
+                <!-- Thông báo phản hồi Đúng / Sai -->
+                <div id="feedback-banner" class="mt-6 hidden rounded-2xl p-4 text-center font-bold text-lg"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===================================================================== -->
+    <!-- MODAL 2: CHỈNH SỬA 15 CÂU HỎI TRỰC TIẾP TRÊN GIAO DIỆN                -->
+    <!-- ===================================================================== -->
+    <div id="editor-modal" class="fixed inset-0 z-40 hidden bg-slate-900/75 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6">
+        <div class="bg-white w-full max-w-4xl max-h-[90vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden border border-slate-200 animate-modal">
+            <!-- Header Modal Chỉnh sửa -->
+            <div class="bg-slate-800 text-white px-6 py-4 flex items-center justify-between shrink-0">
+                <div>
+                    <h2 class="text-xl font-bold flex items-center gap-2">
+                        <span>⚙️ Thiết Lập 15 Câu Hỏi Trắc Nghiệm</span>
+                    </h2>
+                    <p class="text-xs text-slate-300 mt-0.5">Thay đổi nội dung bên dưới và bấm "Lưu thay đổi" để áp dụng ngay.</p>
+                </div>
+                <button id="btn-close-editor" class="text-slate-300 hover:text-white bg-white/10 hover:bg-white/20 rounded-xl p-2 transition">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            </div>
+
+            <!-- Danh sách 15 form câu hỏi có thể cuộn -->
+            <div id="editor-list" class="p-6 overflow-y-auto space-y-6 flex-1 bg-slate-50">
+                <!-- Khung nhập nhanh từ file Word (.docx) hoặc Copy/Paste -->
+                <div class="bg-gradient-to-r from-indigo-50 via-blue-50 to-sky-50 border-2 border-indigo-200 rounded-2xl p-4 sm:p-5 shadow-sm">
+                    <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+                        <div>
+                            <h3 class="text-base font-black text-indigo-950 flex items-center gap-2">
+                                <span>📄 Nhập nhanh 15 câu hỏi từ File Word (.docx)</span>
+                            </h3>
+                            <p class="text-xs text-slate-600 mt-0.5">
+                                Tải lên file <strong>.docx</strong> hoặc dán nội dung từ Word. Hệ thống tự nhận diện <strong>Câu 1...15</strong>, đáp án <strong>A, B, C, D</strong> và tự động chọn đáp án đúng nếu bạn <strong>tô màu / gạch chân / bôi đậm</strong> hoặc ghi <code>Đáp án: A</code>.
+                            </p>
+                        </div>
+                        <label for="upload-word-input" class="cursor-pointer bg-indigo-600 hover:bg-indigo-700 active:scale-95 text-white font-bold px-4 py-2.5 rounded-xl shadow-sm transition flex items-center gap-2 text-xs sm:text-sm shrink-0">
+                            <span>📂 Chọn file Word (.docx)</span>
+                        </label>
+                        <input type="file" id="upload-word-input" accept=".docx" class="hidden">
+                    </div>
+
+                    <div class="space-y-2.5">
+                        <textarea id="word-paste-textarea" rows="4"
+                            class="w-full px-3.5 py-2.5 rounded-xl border border-indigo-200 bg-white focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none text-xs sm:text-sm font-medium text-slate-800"
+                            placeholder="Hoặc mở file Word -> nhấn Ctrl+A, Ctrl+C -> dán (Ctrl+V) vào khung này theo mẫu:&#10;Câu 1: Nguyên tố nào luôn có mặt trong mọi hợp chất hữu cơ?&#10;A. Oxygen.&#10;B. Nitrogen.&#10;C. Carbon.&#10;D. Sulfur.&#10;Đáp án: C"></textarea>
+                        <div class="flex flex-wrap items-center justify-between gap-2">
+                            <span id="word-import-status" class="text-xs font-bold text-indigo-700"></span>
+                            <button type="button" id="btn-parse-word-text" class="bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold px-4 py-2 rounded-xl shadow-sm transition text-xs sm:text-sm">
+                                ⚡ Tự động điền vào 15 câu bên dưới
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Vùng chứa 15 thẻ câu hỏi chi tiết -->
+                <div id="editor-cards-container" class="space-y-5"></div>
+            </div>
+
+            <!-- Footer Modal Chỉnh sửa -->
+            <div class="bg-white border-t border-slate-200 px-6 py-4 flex flex-wrap items-center justify-between gap-3 shrink-0">
+                <button id="btn-restore-defaults" class="text-rose-600 hover:bg-rose-50 font-semibold px-4 py-2.5 rounded-xl border border-rose-200 transition text-sm">
+                    Khôi phục 15 câu hỏi mặc định
+                </button>
+                <div class="flex items-center gap-3">
+                    <button id="btn-cancel-editor" class="bg-slate-200 hover:bg-slate-300 text-slate-800 font-semibold px-5 py-2.5 rounded-xl transition text-sm">
+                        Hủy
+                    </button>
+                    <button id="btn-save-questions" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-6 py-2.5 rounded-xl shadow-md transition text-sm">
+                        💾 Lưu thay đổi
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===================================================================== -->
+    <!-- MODAL 3: BẢNG ĐIỀU KHIỂN & KIỂM SOÁT TRỰC TIẾP DÀNH CHO GIÁO VIÊN     -->
+    <!-- ===================================================================== -->
+    <div id="teacher-dashboard-modal" class="fixed inset-0 z-40 hidden bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-2 sm:p-5">
+        <div class="bg-white w-full max-w-6xl max-h-[92vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden border-2 border-emerald-200 animate-modal">
+            <!-- Header Dashboard -->
+            <div class="bg-gradient-to-r from-emerald-700 to-teal-700 text-white px-6 py-4 flex flex-wrap items-center justify-between gap-4 shrink-0">
+                <div>
+                    <div class="flex items-center gap-3 flex-wrap">
+                        <h2 class="text-xl sm:text-2xl font-black uppercase tracking-tight">
+                            📊 Bảng Kiểm Soát Học Sinh Trực Tiếp
+                        </h2>
+                        <span class="bg-amber-400 text-slate-950 font-black px-3 py-1 rounded-xl text-sm shadow">
+                            Mã phòng: <span id="dash-room-code">HOA11</span>
+                        </span>
+                        <span class="bg-white/20 text-white font-black px-3 py-1 rounded-xl text-sm border border-white/30">
+                            🎯 Đợt <span id="dash-round-num">1</span> • Không giới hạn thời gian
+                        </span>
+                    </div>
+                    <p class="text-xs sm:text-sm text-emerald-100 mt-1">
+                        Học sinh chủ động tham gia bất cứ lúc nào (giáo viên bấm <strong>"Xóa bảng điểm & Đợt mới"</strong> khi kết thúc lượt) • <span class="inline-block w-3 h-3 bg-emerald-400 rounded-sm align-middle"></span> Đúng | <span class="inline-block w-3 h-3 bg-rose-500 rounded-sm align-middle"></span> Sai | <span class="inline-block w-3 h-3 bg-slate-300 rounded-sm align-middle"></span> Chưa làm
+                    </p>
+                </div>
+
+                <div class="flex items-center gap-2">
+                    <button id="btn-reset-round-now" class="bg-amber-400 hover:bg-amber-300 active:scale-95 text-slate-950 font-black px-4 py-2 rounded-xl transition flex items-center gap-1.5 text-sm shadow-md">
+                        <span>🔄 Xóa bảng điểm & Đợt mới</span>
+                    </button>
+                    <button id="btn-close-dashboard" class="bg-white/15 hover:bg-white/25 text-white font-bold px-4 py-2 rounded-xl transition flex items-center gap-1.5 text-sm">
+                        <span>✕ Đóng bảng</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Thanh thống kê nhanh & Công cụ quản lý phòng -->
+            <div class="bg-emerald-50/70 border-b border-emerald-100 px-6 py-3.5 flex flex-wrap items-center justify-between gap-3 shrink-0">
+                <div class="flex flex-wrap items-center gap-4 text-sm">
+                    <div class="bg-white px-3.5 py-2 rounded-xl border border-emerald-200 shadow-sm">
+                        <span class="text-slate-500">Sĩ số tham gia:</span>
+                        <strong id="dash-total-students" class="text-indigo-700 text-base ml-1">0</strong>
+                    </div>
+                    <div class="bg-white px-3.5 py-2 rounded-xl border border-emerald-200 shadow-sm">
+                        <span class="text-slate-500">Đã mở hết 15 mảnh:</span>
+                        <strong id="dash-completed-students" class="text-emerald-600 text-base ml-1">0</strong>
+                    </div>
+                    <div class="bg-white px-3.5 py-2 rounded-xl border border-emerald-200 shadow-sm">
+                        <span class="text-slate-500">Điểm trung bình:</span>
+                        <strong id="dash-avg-score" class="text-amber-600 text-base ml-1">0</strong>
+                    </div>
+                    <div id="sync-status-pill" class="bg-emerald-100 text-emerald-800 border border-emerald-300 px-3 py-1.5 rounded-xl text-xs font-extrabold flex items-center gap-1.5">
+                        <span class="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>
+                        <span>Đồng bộ trực tiếp</span>
+                    </div>
+                </div>
+
+                <!-- Các nút điều khiển phòng của Giáo viên -->
+                <div class="flex flex-wrap items-center gap-2">
+                    <button id="btn-new-room-code" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-3.5 py-2 rounded-xl text-xs sm:text-sm shadow-sm transition">
+                        🎲 Tạo mã phòng mới
+                    </button>
+                    <button id="btn-show-room-qr" class="bg-sky-600 hover:bg-sky-700 text-white font-semibold px-3.5 py-2 rounded-xl text-xs sm:text-sm shadow-sm transition">
+                        📱 Lấy Link & Mã QR phòng này
+                    </button>
+                    <button id="btn-dash-to-top3" class="bg-amber-500 hover:bg-amber-600 text-white font-semibold px-3.5 py-2 rounded-xl text-xs sm:text-sm shadow-sm transition">
+                        🏆 Vinh danh Top 3
+                    </button>
+                    <button id="btn-export-csv" class="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold px-3.5 py-2 rounded-xl text-xs sm:text-sm shadow-sm transition">
+                        📥 Xuất điểm Excel (CSV)
+                    </button>
+                    <button id="btn-clear-room-data" class="bg-rose-600 hover:bg-rose-700 text-white font-semibold px-3.5 py-2 rounded-xl text-xs sm:text-sm shadow-sm transition">
+                        🗑️ Xóa bảng điểm đợt này
+                    </button>
+                </div>
+            </div>
+
+            <!-- Hộp hiển thị Link & Mã QR tự động gắn đúng Mã phòng hiện tại cho học sinh quét -->
+            <div id="room-qr-share-box" class="hidden bg-indigo-50 border-b border-indigo-200 px-6 py-4 flex flex-wrap items-center justify-between gap-4 shrink-0">
+                <div class="flex items-center gap-4">
+                    <div class="bg-white p-2 rounded-2xl border-2 border-indigo-300 shadow-sm shrink-0">
+                        <img id="room-qr-image" src="" alt="Mã QR phòng học" class="w-24 h-24 sm:w-28 sm:h-28 object-contain">
+                    </div>
+                    <div class="space-y-1.5">
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <span class="bg-indigo-600 text-white text-xs font-black px-2.5 py-0.5 rounded-lg">Mã QR Phòng: <span id="qr-box-room-code">HOA11</span></span>
+                            <span class="text-xs font-bold text-emerald-700">✅ Học sinh quét mã này sẽ tự động vào đúng phòng mới!</span>
+                        </div>
+                        <p class="text-xs text-slate-600">Đường link gắn sẵn mã phòng (gửi qua Zalo cho học sinh):</p>
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <input type="text" id="room-share-url-input" readonly class="w-64 sm:w-96 px-3 py-1.5 rounded-xl border border-indigo-300 bg-white text-xs font-mono font-bold text-indigo-900 outline-none">
+                            <button type="button" id="btn-copy-share-url" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold px-3.5 py-1.5 rounded-xl text-xs shadow transition">
+                                📋 Sao chép Link
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <button type="button" id="btn-close-qr-box" class="bg-white hover:bg-slate-100 text-slate-600 border border-slate-300 font-bold px-3 py-1.5 rounded-xl text-xs">
+                    ✕ Đóng QR
+                </button>
+            </div>
+            </div>
+
+            <!-- Hộp xác nhận xóa bảng điểm & bắt đầu đợt thi mới (thay thế confirm() của trình duyệt) -->
+            <div id="confirm-clear-box" class="hidden bg-rose-50 border-b border-rose-200 px-6 py-3.5 flex flex-wrap items-center justify-between gap-3 shrink-0">
+                <span class="text-rose-900 font-bold text-sm">⚠️ Xóa toàn bộ bảng điểm đợt hiện tại của phòng <strong id="confirm-room-label">HOA11</strong> để mở đợt thi tiếp theo?</span>
+                <div class="flex flex-wrap items-center gap-2">
+                    <button id="btn-export-before-clear" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-3.5 py-1.5 rounded-lg text-xs">
+                        📥 Xuất Excel rồi Xóa
+                    </button>
+                    <button id="btn-confirm-clear-yes" class="bg-rose-600 hover:bg-rose-700 text-white font-bold px-4 py-1.5 rounded-lg text-xs">
+                        🗑️ Xóa bảng điểm ngay
+                    </button>
+                    <button id="btn-confirm-clear-no" class="bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 font-semibold px-3 py-1.5 rounded-lg text-xs">
+                        Hủy
+                    </button>
+                </div>
+            </div>
+
+            <!-- Bảng danh sách học sinh thời gian thực -->
+            <div class="flex-1 overflow-auto p-4 sm:p-6 bg-slate-50">
+                <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
+                    <table class="w-full text-left border-collapse min-w-[960px]">
+                        <thead>
+                            <tr class="bg-slate-100 border-b border-slate-200 text-slate-700 text-xs uppercase tracking-wider">
+                                <th class="py-3.5 px-4 font-extrabold text-center w-16">Hạng</th>
+                                <th class="py-3.5 px-4 font-extrabold">Họ và tên</th>
+                                <th class="py-3.5 px-4 font-extrabold">Nhóm / Lớp</th>
+                                <th class="py-3.5 px-4 font-extrabold text-center">Tiến độ</th>
+                                <th class="py-3.5 px-4 font-extrabold text-center">Điểm số</th>
+                                <th class="py-3.5 px-4 font-extrabold text-center">Thời gian</th>
+                                <th class="py-3.5 px-4 font-extrabold">Chi tiết 15 câu (1 → 15)</th>
+                                <th class="py-3.5 px-4 font-extrabold text-center">Trạng thái</th>
+                            </tr>
+                        </thead>
+                        <tbody id="dashboard-students-tbody" class="divide-y divide-slate-100 text-sm">
+                            <tr>
+                                <td colspan="8" class="py-12 text-center text-slate-400 font-medium">
+                                    Đang chờ học sinh đăng nhập vào phòng...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===================================================================== -->
+    <!-- MODAL 4: TỔNG KẾT CÁ NHÂN SAU KHI HỌC SINH MỞ XONG 10 MẢNH GHÉP       -->
+    <!-- ===================================================================== -->
+    <div id="student-summary-modal" class="fixed inset-0 z-40 hidden bg-slate-900/80 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="bg-white w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden border-2 border-amber-300 animate-modal text-center">
+            <div class="bg-gradient-to-r from-amber-500 via-orange-500 to-rose-500 text-white p-6 relative overflow-hidden">
+                <div class="text-5xl mb-2 drop-shadow">🎉🏆🎉</div>
+                <h2 class="text-2xl sm:text-3xl font-black uppercase tracking-tight">Hoàn Thành Xuất Sắc!</h2>
+                <p class="text-amber-100 text-sm font-semibold mt-1">Chúc mừng bạn đã lật mở trọn vẹn bức tranh tri ân 20/11</p>
+            </div>
+
+            <div class="p-6 sm:p-7 space-y-5">
+                <div class="bg-indigo-50 border border-indigo-100 rounded-2xl p-4">
+                    <p class="text-xs font-bold uppercase tracking-wider text-indigo-600">Thí sinh</p>
+                    <p id="summary-student-name" class="text-xl font-black text-slate-900 mt-0.5">Nguyễn Văn An</p>
+                    <p id="summary-student-group" class="text-sm font-bold text-indigo-700">Nhóm 1 • Phòng HOA11</p>
+                </div>
+
+                <!-- 3 Thẻ chỉ số thành tích -->
+                <div class="grid grid-cols-3 gap-3">
+                    <div class="bg-emerald-50 border border-emerald-200 rounded-2xl p-3">
+                        <span class="block text-xs font-bold text-emerald-700">Điểm số</span>
+                        <strong id="summary-score" class="text-2xl font-black text-emerald-600">100</strong>
+                    </div>
+                    <div class="bg-sky-50 border border-sky-200 rounded-2xl p-3">
+                        <span class="block text-xs font-bold text-sky-700">Thời gian</span>
+                        <strong id="summary-time" class="text-lg sm:text-xl font-black font-mono text-sky-700">00:45.2s</strong>
+                    </div>
+                    <div class="bg-amber-50 border border-amber-200 rounded-2xl p-3">
+                        <span class="block text-xs font-bold text-amber-700">Thứ hạng</span>
+                        <strong id="summary-rank" class="text-2xl font-black text-amber-600">#1</strong>
+                    </div>
+                </div>
+
+                <div class="flex flex-col sm:flex-row gap-3 pt-2">
+                    <button id="btn-summary-view-top3" class="flex-1 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-black py-3.5 px-4 rounded-2xl shadow-lg shadow-amber-200 transition flex items-center justify-center gap-2">
+                        <span>🏆 Xem Bảng Vàng Top 3</span>
+                    </button>
+                    <button id="btn-close-summary-modal" class="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-3.5 px-5 rounded-2xl transition">
+                        Xem lại tranh
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===================================================================== -->
+    <!-- MODAL 5: BẢNG VÀNG TỔNG KẾT & VINH DANH TOP 3 HỌC SINH XUẤT SẮC NHẤT  -->
+    <!-- ===================================================================== -->
+    <div id="top3-modal" class="fixed inset-0 z-40 hidden bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-2 sm:p-5 overflow-y-auto">
+        <div class="bg-gradient-to-b from-indigo-950 via-slate-900 to-indigo-950 text-white w-full max-w-4xl rounded-3xl shadow-2xl border-2 border-amber-400/60 overflow-hidden animate-modal my-auto">
+            <!-- Header Bảng Vàng -->
+            <div class="bg-gradient-to-r from-amber-500/20 via-yellow-500/20 to-amber-500/20 border-b border-amber-400/30 px-6 py-4 flex flex-wrap items-center justify-between gap-3">
+                <div class="flex items-center gap-3">
+                    <span class="text-3xl sm:text-4xl">🏆</span>
+                    <div>
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <h2 class="text-xl sm:text-2xl font-black uppercase tracking-wide text-amber-300">
+                                Bảng Vàng Vinh Danh Top 3
+                            </h2>
+                            <span class="bg-amber-400 text-slate-950 font-black px-2.5 py-0.5 rounded-lg text-xs">
+                                Phòng: <span id="top3-room-code">HOA11</span>
+                            </span>
+                        </div>
+                        <p class="text-xs sm:text-sm text-indigo-200 mt-0.5">
+                            Vinh danh 3 học sinh có điểm số cao nhất và hoàn thành nhanh nhất
+                        </p>
+                    </div>
+                </div>
+
+                <div class="flex items-center gap-2">
+                    <button id="btn-export-top3-csv" class="bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-3.5 py-2 rounded-xl text-xs sm:text-sm shadow transition flex items-center gap-1.5">
+                        <span>📥 Xuất DS Top 3</span>
+                    </button>
+                    <button id="btn-top3-reset-round" class="hidden bg-rose-600 hover:bg-rose-500 text-white font-bold px-3.5 py-2 rounded-xl text-xs sm:text-sm shadow transition flex items-center gap-1.5">
+                        <span>🔄 Xóa bảng điểm</span>
+                    </button>
+                    <button id="btn-close-top3" class="bg-white/10 hover:bg-white/20 text-white font-bold px-3.5 py-2 rounded-xl text-sm transition">
+                        ✕ Đóng
+                    </button>
+                </div>
+            </div>
+
+            <!-- Thanh tiêu chí xếp hạng -->
+            <div class="bg-white/5 border-b border-white/10 px-6 py-3 flex flex-wrap items-center justify-between gap-2">
+                <span class="text-xs sm:text-sm font-bold text-amber-200">
+                    🎯 Tiêu chí xếp hạng: <strong>Điểm số cao nhất</strong> ➔ <strong>Thời gian làm bài nhanh nhất</strong>
+                </span>
+                <span class="text-xs text-indigo-300 font-semibold">Tự động cập nhật trực tiếp</span>
+            </div>
+
+            <!-- Khu vực Bục Vinh Danh Podium (Top 1 - 2 - 3) -->
+            <div id="top3-content-area" class="p-6 sm:p-8">
+                <!-- Nội dung Podium Top 3 sẽ được render bằng JS -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Hộp thoại thông báo nhỏ (Toast) thay thế alert() -->
+    <div id="toast-message" class="fixed bottom-6 right-6 z-50 transform translate-y-20 opacity-0 transition-all duration-300 bg-slate-900 text-white px-5 py-3 rounded-2xl shadow-xl font-semibold text-sm flex items-center gap-2.5">
+        <span id="toast-icon">✅</span>
+        <span id="toast-text">Thông báo</span>
+    </div>
+
+    <!-- ===================================================================== -->
+    <!-- MÃ NGUỒN FIREBASE + JAVASCRIPT ĐIỀU KHIỂN TRÒ CHƠI & ĐỒNG BỘ REALTIME -->
+    <!-- ===================================================================== -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc, setDoc, deleteDoc, onSnapshot, collection } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        /**
+         * =========================================================================
+         * PHẦN 0: KHỞI TẠO FIREBASE FIRESTORE & AUTHENTICATION THỜI GIAN THỰC
+         * =========================================================================
+         */
+        const appId = typeof __app_id !== "undefined" ? __app_id : "lat-mo-manh-ghep-hoa11";
+        let db = null;
+        let auth = null;
+        let currentUser = null;
+        let unsubscribeRoomListener = null;
+
+        async function ensureFirebaseAuthenticated() {
+            if (currentUser && db) return true;
+            if (!auth) return false;
+            try {
+                if (typeof __initial_auth_token !== "undefined" && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+                currentUser = auth.currentUser;
+                return Boolean(currentUser && db);
+            } catch (err) {
+                console.warn("Lỗi xác thực Firebase:", err);
+                return false;
+            }
+        }
+
+        async function initFirebaseService() {
+            try {
+                const rawCfg = typeof __firebase_config !== "undefined"
+                    ? __firebase_config
+                    : (window.__BUNDLED_GAME_DATA__ && window.__BUNDLED_GAME_DATA__.firebaseConfig ? window.__BUNDLED_GAME_DATA__.firebaseConfig : null);
+                if (!rawCfg) {
+                    console.warn("Không tìm thấy cấu hình Firebase môi trường, chạy chế độ cục bộ.");
+                    updateStudentServerSyncBadge("local");
+                    return;
+                }
+                const firebaseConfig = typeof rawCfg === "string" ? JSON.parse(rawCfg) : rawCfg;
+                const app = initializeApp(firebaseConfig);
+                auth = getAuth(app);
+                db = getFirestore(app);
+
+                // Đăng nhập trước khi thực hiện bất kỳ truy vấn Firestore nào (Rule 3)
+                await ensureFirebaseAuthenticated();
+
+                onAuthStateChanged(auth, async (user) => {
+                    currentUser = user;
+                    if (user && currentRoomCode) {
+                        await fetchRoomConfigOnce(currentRoomCode);
+                        if (userRole === "teacher") {
+                            await fetchTeacherSavedQuestionBank();
+                        }
+                        subscribeToRoomData(currentRoomCode);
+                        if (userRole === "student" && studentProfile.id) {
+                            await syncStudentProgressToFirestore(true);
+                        }
+                    }
+                });
+            } catch (err) {
+                console.error("Lỗi khởi tạo Firebase:", err);
+                updateStudentServerSyncBadge("error");
+            }
+        }
+
+        function updateStudentServerSyncBadge(state) {
+            const badge = document.getElementById("student-server-sync-badge");
+            if (!badge) return;
+            if (userRole !== "student") {
+                badge.classList.add("hidden");
+                badge.classList.remove("inline-flex");
+                return;
+            }
+            badge.classList.remove("hidden");
+            badge.classList.add("inline-flex");
+            if (state === "synced") {
+                badge.className = "inline-flex bg-emerald-100 text-emerald-800 border border-emerald-300 px-2 py-0.5 rounded-full text-[11px] font-extrabold items-center gap-1";
+                badge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span><span>📡 Đã gửi điểm về máy GV</span>`;
+            } else if (state === "syncing") {
+                badge.className = "inline-flex bg-amber-100 text-amber-800 border border-amber-300 px-2 py-0.5 rounded-full text-[11px] font-extrabold items-center gap-1";
+                badge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping"></span><span>⏳ Đang truyền về máy GV...</span>`;
+            } else {
+                badge.className = "inline-flex bg-rose-100 text-rose-800 border border-rose-300 px-2 py-0.5 rounded-full text-[11px] font-extrabold items-center gap-1";
+                badge.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-rose-500"></span><span>⚠️ Đang kết nối lại máy GV</span>`;
+            }
+        }
+
+        // Lưu vĩnh viễn bộ 15 câu hỏi hiện tại vào kho đám mây cá nhân của Giáo viên & Phòng học (không bao giờ mất khi F5/đóng tab)
+        async function saveQuestionBankToCloud(bankTitle = "Bộ câu hỏi Word mới nhất") {
+            const ready = await ensureFirebaseAuthenticated();
+            if (!ready || !currentUser || !db) return false;
+
+            const savedAt = Date.now();
+            localQuestionsUpdatedAt = savedAt;
+
+            try {
+                // 1. Lưu vào kho riêng của Giáo viên trên Firestore (tồn tại vĩnh viễn qua các lần mở lại app)
+                const teacherBankRef = doc(db, "artifacts", appId, "users", currentUser.uid, "teacher_question_banks", "active_set");
+                await setDoc(teacherBankRef, {
+                    title: bankTitle,
+                    questions: questions,
+                    roomCode: currentRoomCode,
+                    updatedAt: savedAt
+                }, { merge: true });
+
+                // 2. Lưu đồng bộ vào cấu hình phòng học hiện tại để học sinh vào phòng nhận đúng bộ đề này
+                if (currentRoomCode) {
+                    const configRef = doc(db, "artifacts", appId, "public", "data", `room_config_${currentRoomCode}`, "questions");
+                    await setDoc(configRef, {
+                        title: bankTitle,
+                        questions: questions,
+                        updatedAt: savedAt
+                    }, { merge: true });
+                }
+
+                updateSavedCloudStatusBadge(bankTitle, savedAt);
+                return true;
+            } catch (err) {
+                console.warn("Lỗi lưu kho câu hỏi lên đám mây:", err);
+                return false;
+            }
+        }
+
+        // Tự động khôi phục bộ câu hỏi đã lưu trên đám mây của Giáo viên khi mở lại ứng dụng
+        async function fetchTeacherSavedQuestionBank() {
+            const ready = await ensureFirebaseAuthenticated();
+            if (!ready || !currentUser || !db) return false;
+
+            try {
+                const teacherBankRef = doc(db, "artifacts", appId, "users", currentUser.uid, "teacher_question_banks", "active_set");
+                const snap = await getDoc(teacherBankRef);
+                if (snap.exists()) {
+                    const data = snap.data();
+                    const cloudTime = Number(data.updatedAt) || 0;
+                    if (Array.isArray(data.questions) && data.questions.length === TOTAL_TILES && cloudTime >= localQuestionsUpdatedAt) {
+                        questions = data.questions;
+                        localQuestionsUpdatedAt = cloudTime;
+                        renderTiles();
+                        if (!editorModal.classList.contains("hidden")) {
+                            renderEditorForms();
+                        }
+                        updateSavedCloudStatusBadge(data.title || "Bộ câu hỏi đã lưu", cloudTime);
+                        return true;
+                    }
+                }
+            } catch (err) {
+                console.warn("Không tải được kho câu hỏi đã lưu của Giáo viên:", err);
+            }
+            return false;
+        }
+
+        function updateSavedCloudStatusBadge(title, timestamp) {
+            const badgeEl = document.getElementById("cloud-question-saved-badge");
+            if (!badgeEl) return;
+            const timeStr = timestamp ? new Date(timestamp).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" }) : "";
+            badgeEl.textContent = `☁️ Đã lưu trên đám mây: "${title}"${timeStr ? ` (${timeStr})` : ""}`;
+            badgeEl.classList.remove("hidden");
+        }
+
+        // Chủ động tải ngay bộ câu hỏi và bức tranh bí mật mới nhất của phòng học từ Firestore
+        async function fetchRoomConfigOnce(roomCode) {
+            if (!roomCode) return;
+            const ready = await ensureFirebaseAuthenticated();
+            if (!ready) return;
+
+            try {
+                const configRef = doc(db, "artifacts", appId, "public", "data", `room_config_${roomCode}`, "questions");
+                const snap = await getDoc(configRef);
+                if (snap.exists()) {
+                    const data = snap.data();
+                    const cloudQTime = Number(data.updatedAt) || 0;
+                    if (Array.isArray(data.questions) && data.questions.length === TOTAL_TILES && cloudQTime >= localQuestionsUpdatedAt) {
+                        questions = data.questions;
+                        localQuestionsUpdatedAt = cloudQTime;
+                        renderTiles();
+                        updateSavedCloudStatusBadge(data.title || `Đề phòng ${roomCode}`, cloudQTime);
+                    }
+                    if (typeof data.secretImage === "string" && data.secretImage.length > 0) {
+                        applySecretImage(data.secretImage, false);
+                    }
+                    if (data.roundId) {
+                        currentRoundId = data.roundId;
+                        currentRoundNumber = Number(data.roundNumber) || currentRoundNumber;
+                        updateRoundCountdownUI();
+                    }
+                }
+            } catch (err) {
+                console.warn("Không tải được cấu hình phòng từ đám mây:", err);
+            }
+        }
+
+        /**
+         * =========================================================================
+         * PHẦN 1: DỮ LIỆU 15 CÂU HỎI MẶC ĐỊNH (HÓA HỌC 11 - ĐẠI CƯƠNG HỮU CƠ)
+         * =========================================================================
+         */
+        const TOTAL_TILES = 15;
+
+        const DEFAULT_QUESTIONS = [
+            {
+                question: "Nguyên tố nào luôn có mặt trong mọi hợp chất hữu cơ?",
+                options: ["Oxygen.", "Nitrogen.", "Carbon.", "Sulfur."],
+                correctIndex: 2 // Đáp án C
+            },
+            {
+                question: "Chất nào sau đây là hợp chất hữu cơ?",
+                options: ["CO₂.", "CH₄.", "CaCO₃.", "NaHCO₃."],
+                correctIndex: 1 // Đáp án B
+            },
+            {
+                question: "Dãy chất nào sau đây gồm toàn hợp chất hữu cơ?",
+                options: [
+                    "CH₄, CO₂, C₂H₅OH.",
+                    "CH₄, C₂H₄, CH₃COOH.",
+                    "C₂H₂, NaHCO₃, CH₃Cl.",
+                    "KCN, C₂H₆, CH₃NH₂."
+                ],
+                correctIndex: 1 // Đáp án B
+            },
+            {
+                question: "Liên kết hóa học chủ yếu trong phân tử hợp chất hữu cơ là",
+                options: [
+                    "liên kết ion.",
+                    "liên kết cộng hóa trị.",
+                    "liên kết kim loại.",
+                    "liên kết hydrogen."
+                ],
+                correctIndex: 1 // Đáp án B
+            },
+            {
+                question: "Dựa vào thành phần nguyên tố, hợp chất hữu cơ chia thành hai loại chính là",
+                options: [
+                    "mạch hở và mạch vòng.",
+                    "no và không no.",
+                    "hydrocarbon và dẫn xuất của hydrocarbon.",
+                    "thiên nhiên và tổng hợp."
+                ],
+                correctIndex: 2 // Đáp án C
+            },
+            {
+                question: "Chất nào sau đây thuộc loại hydrocarbon?",
+                options: ["CH₃Cl.", "C₂H₅OH.", "C₃H₈.", "CH₃NH₂."],
+                correctIndex: 2 // Đáp án C
+            },
+            {
+                question: "Chất nào sau đây là dẫn xuất của hydrocarbon?",
+                options: ["C₂H₂.", "C₆H₆.", "CH₃COOH.", "C₄H₁₀."],
+                correctIndex: 2 // Đáp án C
+            },
+            {
+                question: "Cho các chất: C₂H₂, CH₂Cl₂, C₆H₆, CH₃COOC₂H₅, C₆H₁₂O₆. Số dẫn xuất của hydrocarbon là",
+                options: ["2.", "3.", "4.", "5."],
+                correctIndex: 1 // Đáp án B
+            },
+            {
+                question: "Khi đặt mẩu nến paraffin và hạt muối ăn lên thìa inox tiếp xúc với nước nóng 70°C, nến chảy lỏng còn muối ăn vẫn rắn. Hiện tượng này chứng tỏ hợp chất hữu cơ có",
+                options: [
+                    "nhiệt độ nóng chảy thấp.",
+                    "nhiệt độ sôi rất cao.",
+                    "tính tan tốt trong nước nóng.",
+                    "liên kết ion rất bền vững."
+                ],
+                correctIndex: 0 // Đáp án A
+            },
+            {
+                question: "Tính chất nào sau đây không phải của đa số hợp chất hữu cơ?",
+                options: [
+                    "Nhiệt độ nóng chảy, nhiệt độ sôi thấp.",
+                    "Ít tan trong nước, tan tốt trong dung môi hữu cơ.",
+                    "Kém bền nhiệt và dễ cháy.",
+                    "Phản ứng hóa học xảy ra rất nhanh và hoàn toàn."
+                ],
+                correctIndex: 3 // Đáp án D
+            },
+            {
+                question: "Nhóm nguyên tử gây ra những tính chất hóa học đặc trưng của phân tử hợp chất hữu cơ được gọi là",
+                options: [
+                    "nhóm thế.",
+                    "nhóm chức.",
+                    "gốc hydrocarbon.",
+                    "mạch carbon."
+                ],
+                correctIndex: 1 // Đáp án B
+            },
+            {
+                question: "Chất nào sau đây thuộc loại chất vô cơ?",
+                options: ["CH₃OH.", "C₆H₁₂O₆.", "CaCO₃.", "CH₃NH₂."],
+                correctIndex: 2 // Đáp án C
+            },
+            {
+                question: "Hợp chất nào sau đây chứa nhóm chức alcohol (-OH)?",
+                options: ["CH₃CHO.", "C₂H₅OH.", "CH₃COOH.", "CH₃COOCH₃."],
+                correctIndex: 1 // Đáp án B
+            },
+            {
+                question: "Trên phổ hồng ngoại (IR) của phân tử ethanol (C₂H₅OH), tín hiệu hấp thụ đặc trưng ở vùng 3600 – 3200 cm⁻¹ thuộc về liên kết nào?",
+                options: ["C–H.", "C–O.", "O–H.", "C=O."],
+                correctIndex: 2 // Đáp án C
+            },
+            {
+                question: "Phương pháp tách biệt và tinh chế nào dùng để tách các chất lỏng có nhiệt độ sôi khác nhau (như tách rượu ethanol khỏi nước)?",
+                options: [
+                    "Phương pháp kết tinh.",
+                    "Phương pháp chiết.",
+                    "Phương pháp chưng cất.",
+                    "Phương pháp sắc kí cột."
+                ],
+                correctIndex: 2 // Đáp án C
+            }
+        ];
+
+        const TILE_COLORS = [
+            "from-rose-500 to-pink-600",
+            "from-orange-500 to-amber-600",
+            "from-emerald-500 to-teal-600",
+            "from-sky-500 to-blue-600",
+            "from-violet-500 to-purple-600",
+            "from-amber-500 to-yellow-600",
+            "from-cyan-500 to-sky-600",
+            "from-fuchsia-500 to-pink-600",
+            "from-indigo-500 to-blue-700",
+            "from-teal-500 to-emerald-600",
+            "from-red-500 to-rose-600",
+            "from-blue-500 to-indigo-600",
+            "from-lime-500 to-green-600",
+            "from-purple-500 to-fuchsia-600",
+            "from-amber-600 to-orange-700"
+        ];
+
+        const STORAGE_KEY = "lat_mo_manh_ghep_hoa11_15q_v1";
+        const SECRET_IMG_STORAGE_KEY = "lat_mo_manh_ghep_secret_img_v1";
+        const TEACHER_PASS_KEY = "lat_mo_manh_ghep_teacher_pass_v1";
+        const DEFAULT_TEACHER_PASS = "GV2011";
+        const DEVICE_SESSION_ID = (typeof crypto !== "undefined" && crypto.randomUUID)
+            ? crypto.randomUUID().slice(0, 8)
+            : Math.random().toString(36).substring(2, 10);
+        let isTeacherAuthenticated = false;
+        let currentSecretImageData = "";
+        let questions = [];
+        let openedTiles = new Array(TOTAL_TILES).fill(false);
+        // Trạng thái từng câu hỏi của học sinh: "unanswered" | "correct" | "wrong"
+        let questionResults = new Array(TOTAL_TILES).fill("unanswered");
+        let activeTileIndex = null;
+        let isAnsweringLocked = false;
+
+        // Thông tin phiên đăng nhập hiện tại
+        let userRole = "teacher"; // "student" | "teacher"
+        function getInitialRoomCodeFromUrl() {
+            try {
+                const params = new URLSearchParams(window.location.search);
+                const urlRoom = (params.get("room") || params.get("phong") || "").trim().toUpperCase();
+                if (urlRoom && /^[A-Z0-9_-]{2,20}$/.test(urlRoom)) {
+                    return urlRoom;
+                }
+            } catch (e) {}
+            if (window.__BUNDLED_GAME_DATA__ && window.__BUNDLED_GAME_DATA__.roomCode) {
+                return String(window.__BUNDLED_GAME_DATA__.roomCode).trim().toUpperCase();
+            }
+            return "HOA11";
+        }
+        let currentRoomCode = getInitialRoomCodeFromUrl();
+        let currentRoundNumber = 1;
+        let currentRoundStartedAt = Date.now();
+        let currentRoundId = `round_1_${currentRoundStartedAt}`;
+        let isResettingRoundInProgress = false;
+        let localQuestionsUpdatedAt = 0; // Mốc thời gian cập nhật câu hỏi cục bộ để không bị snapshot cũ ghi đè
+        let localImageUpdatedAt = 0; // Mốc thời gian cập nhật ảnh cục bộ
+
+        // Tham chiếu các phần tử màn hình đăng nhập & mật khẩu giáo viên
+        const roleLoginScreen = document.getElementById("role-login-screen");
+        const tabStudentBtn = document.getElementById("tab-student-btn");
+        const tabTeacherBtn = document.getElementById("tab-teacher-btn");
+        const studentLoginForm = document.getElementById("student-login-form");
+        const teacherLoginPanel = document.getElementById("teacher-login-panel");
+
+        function getTeacherPassword() {
+            try {
+                return localStorage.getItem(TEACHER_PASS_KEY) || DEFAULT_TEACHER_PASS;
+            } catch (e) {
+                return DEFAULT_TEACHER_PASS;
+            }
+        }
+
+        let studentProfile = {
+            id: "",
+            name: "Khách",
+            group: "Nhóm 1",
+            roundId: currentRoundId,
+            score: 0,
+            elapsedSeconds: 0,
+            startedAt: null,
+            finishedAt: null,
+            completed: false
+        };
+        let timerInterval = null;
+        let timerStartTimestamp = null;
+        let roomStudentsList = [];
+        let unsubscribeQuestionsListener = null;
+        let isSyncInFlight = false;
+        let hasQueuedSync = false;
+        const localSessionSubmissions = new Map();
+
+        // Sao chép mã phòng & Link phòng gắn sẵn tham số ?room=
+        function buildRoomShareUrl(roomCode) {
+            try {
+                const urlObj = new URL(window.location.href);
+                urlObj.searchParams.set("room", roomCode);
+                return urlObj.toString();
+            } catch (e) {
+                const base = window.location.href.split("?")[0];
+                return `${base}?room=${encodeURIComponent(roomCode)}`;
+            }
+        }
+
+        function copyTextToClipboardSafe(text, successMsg) {
+            const tempInput = document.createElement("input");
+            tempInput.value = text;
+            document.body.appendChild(tempInput);
+            tempInput.select();
+            document.execCommand("copy");
+            document.body.removeChild(tempInput);
+            showToast(successMsg);
+        }
+
+        function syncRoomCodeAcrossAllUI(roomCode) {
+            currentRoomCode = roomCode;
+            const dashCodeEl = document.getElementById("dash-room-code");
+            const headerBadgeEl = document.getElementById("header-room-badge");
+            const teacherDispEl = document.getElementById("teacher-room-display");
+            const studentInputEl = document.getElementById("student-room-input");
+            const qrCodeLabelEl = document.getElementById("qr-box-room-code");
+            const shareUrlInput = document.getElementById("room-share-url-input");
+            const qrImg = document.getElementById("room-qr-image");
+
+            if (dashCodeEl) dashCodeEl.textContent = roomCode;
+            if (headerBadgeEl) headerBadgeEl.textContent = `Phòng: ${roomCode}`;
+            if (teacherDispEl) teacherDispEl.textContent = roomCode;
+            if (studentInputEl) studentInputEl.value = roomCode;
+            if (qrCodeLabelEl) qrCodeLabelEl.textContent = roomCode;
+
+            const shareUrl = buildRoomShareUrl(roomCode);
+            if (shareUrlInput) shareUrlInput.value = shareUrl;
+            if (qrImg) {
+                qrImg.src = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(shareUrl)}`;
+            }
+            try {
+                window.history.replaceState({}, "", shareUrl);
+            } catch (e) {}
+        }
+
+        document.getElementById("btn-copy-room-code").addEventListener("click", () => {
+            copyTextToClipboardSafe(currentRoomCode, `📋 Đã sao chép mã phòng: ${currentRoomCode}`);
+        });
+
+        document.getElementById("btn-copy-room-link-login").addEventListener("click", () => {
+            const shareUrl = buildRoomShareUrl(currentRoomCode);
+            copyTextToClipboardSafe(shareUrl, `🔗 Đã sao chép Link kèm sẵn phòng ${currentRoomCode}!`);
+        });
+
+        document.getElementById("btn-show-room-qr").addEventListener("click", () => {
+            syncRoomCodeAcrossAllUI(currentRoomCode);
+            document.getElementById("room-qr-share-box").classList.toggle("hidden");
+        });
+
+        document.getElementById("btn-close-qr-box").addEventListener("click", () => {
+            document.getElementById("room-qr-share-box").classList.add("hidden");
+        });
+
+        document.getElementById("btn-copy-share-url").addEventListener("click", () => {
+            const shareUrl = buildRoomShareUrl(currentRoomCode);
+            copyTextToClipboardSafe(shareUrl, `🔗 Đã sao chép Link phòng ${currentRoomCode} để gửi cho học sinh!`);
+        });
+
+        tabStudentBtn.addEventListener("click", () => {
+            tabStudentBtn.className = "py-3.5 px-4 text-indigo-700 bg-white border-b-4 border-indigo-600 flex items-center justify-center gap-2 transition";
+            tabTeacherBtn.className = "py-3.5 px-4 text-slate-500 hover:text-slate-800 flex items-center justify-center gap-2 transition";
+            studentLoginForm.classList.remove("hidden");
+            teacherLoginPanel.classList.add("hidden");
+        });
+
+        tabTeacherBtn.addEventListener("click", () => {
+            tabTeacherBtn.className = "py-3.5 px-4 text-indigo-700 bg-white border-b-4 border-indigo-600 flex items-center justify-center gap-2 transition";
+            tabStudentBtn.className = "py-3.5 px-4 text-slate-500 hover:text-slate-800 flex items-center justify-center gap-2 transition";
+            teacherLoginPanel.classList.remove("hidden");
+            studentLoginForm.classList.add("hidden");
+            updateTeacherGateUI();
+        });
+
+        function updateTeacherGateUI() {
+            const gateEl = document.getElementById("teacher-password-gate");
+            const unlockedEl = document.getElementById("teacher-unlocked-controls");
+            const errEl = document.getElementById("teacher-pass-error");
+            errEl.classList.add("hidden");
+
+            if (isTeacherAuthenticated) {
+                gateEl.classList.add("hidden");
+                unlockedEl.classList.remove("hidden");
+            } else {
+                gateEl.classList.remove("hidden");
+                unlockedEl.classList.add("hidden");
+                document.getElementById("teacher-password-input").value = "";
+            }
+        }
+
+        function verifyTeacherPassword() {
+            const inputVal = document.getElementById("teacher-password-input").value.trim();
+            const errEl = document.getElementById("teacher-pass-error");
+            if (inputVal === getTeacherPassword()) {
+                isTeacherAuthenticated = true;
+                errEl.classList.add("hidden");
+                updateTeacherGateUI();
+                showToast("🔓 Đã mở khóa khu vực quản lý của Giáo viên!");
+            } else {
+                errEl.classList.remove("hidden");
+                const inputEl = document.getElementById("teacher-password-input");
+                inputEl.classList.remove("animate-shake");
+                void inputEl.offsetWidth;
+                inputEl.classList.add("animate-shake");
+            }
+        }
+
+        document.getElementById("btn-unlock-teacher").addEventListener("click", verifyTeacherPassword);
+        document.getElementById("teacher-password-input").addEventListener("keydown", (e) => {
+            if (e.key === "Enter") {
+                e.preventDefault();
+                verifyTeacherPassword();
+            }
+        });
+
+        document.getElementById("btn-toggle-change-pass").addEventListener("click", () => {
+            document.getElementById("change-teacher-pass-box").classList.toggle("hidden");
+        });
+
+        document.getElementById("btn-save-new-pass").addEventListener("click", () => {
+            const newPass = document.getElementById("new-teacher-pass-input").value.trim();
+            if (newPass.length < 3) {
+                showToast("⚠️ Mật khẩu mới cần có ít nhất 3 ký tự!");
+                return;
+            }
+            try {
+                localStorage.setItem(TEACHER_PASS_KEY, newPass);
+            } catch (e) {
+                console.warn(e);
+            }
+            document.getElementById("new-teacher-pass-input").value = "";
+            document.getElementById("change-teacher-pass-box").classList.add("hidden");
+            showToast(`🔑 Đã cập nhật mật khẩu Giáo viên mới: ${newPass}`);
+        });
+
+        // Sao chép mã phòng
+        document.getElementById("btn-copy-room-code").addEventListener("click", () => {
+            const tempInput = document.createElement("input");
+            tempInput.value = currentRoomCode;
+            document.body.appendChild(tempInput);
+            tempInput.select();
+            document.execCommand("copy");
+            document.body.removeChild(tempInput);
+            showToast(`📋 Đã sao chép mã phòng: ${currentRoomCode}`);
+        });
+
+        // Học sinh bấm "Vào chơi ngay"
+        studentLoginForm.addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const rawName = document.getElementById("student-name-input").value.replace(/\s+/g, " ").trim();
+            const groupVal = document.getElementById("student-group-select").value;
+            const roomVal = document.getElementById("student-room-input").value.trim().toUpperCase();
+            const errBox = document.getElementById("login-error-box");
+
+            if (!rawName || !roomVal) {
+                errBox.textContent = "Vui lòng nhập đầy đủ Họ tên và Mã phòng học!";
+                errBox.classList.remove("hidden");
+                return;
+            }
+            errBox.classList.add("hidden");
+
+            userRole = "student";
+            currentRoomCode = roomVal;
+
+            // Chủ động tải ngay bộ câu hỏi, tranh bí mật & thông tin đợt thi 20 phút mới nhất của phòng học
+            await ensureFirebaseAuthenticated();
+            await fetchRoomConfigOnce(currentRoomCode);
+
+            const uid = currentUser ? currentUser.uid : "anon";
+            const startEpoch = Date.now();
+            // Kết hợp uid + mã phiên thiết bị + tên chuẩn hóa + timestamp để mỗi học sinh có 1 bản ghi riêng biệt tuyệt đối
+            const safeNameSlug = rawName.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 14) || "hs";
+            studentProfile = {
+                id: `${uid}_${DEVICE_SESSION_ID}_${safeNameSlug}_${startEpoch.toString(36)}`,
+                name: rawName,
+                group: groupVal,
+                roundId: currentRoundId,
+                score: 0,
+                elapsedSeconds: 0,
+                startedAt: startEpoch,
+                finishedAt: null,
+                completed: false
+            };
+
+            // Reset trạng thái bàn chơi cho học sinh mới
+            openedTiles = new Array(TOTAL_TILES).fill(false);
+            questionResults = new Array(TOTAL_TILES).fill("unanswered");
+            renderTiles();
+            applyRoleUI();
+
+            roleLoginScreen.classList.add("hidden");
+            startStudentTimer();
+
+            if (currentUser && db) {
+                subscribeToRoomData(currentRoomCode);
+            }
+            await syncStudentProgressToFirestore(true);
+            showToast(`🎉 Chào mừng ${rawName} (${groupVal}) vào Phòng ${currentRoomCode}!`);
+        });
+
+        // Giáo viên vào Bảng Theo Dõi Trực Tiếp (Dashboard)
+        document.getElementById("btn-enter-teacher-dashboard").addEventListener("click", () => {
+            if (!isTeacherAuthenticated) return;
+            enterTeacherMode(true);
+        });
+
+        // Giáo viên vào Màn hình Lật mảnh ghép trình chiếu
+        document.getElementById("btn-enter-teacher-board").addEventListener("click", () => {
+            if (!isTeacherAuthenticated) return;
+            enterTeacherMode(false);
+        });
+
+        async function enterTeacherMode(openDashboardImmediately) {
+            if (!isTeacherAuthenticated) return;
+            userRole = "teacher";
+            stopStudentTimer();
+            applyRoleUI();
+            roleLoginScreen.classList.add("hidden");
+
+            await ensureFirebaseAuthenticated();
+            const hasTeacherBank = await fetchTeacherSavedQuestionBank();
+            if (!hasTeacherBank) {
+                await fetchRoomConfigOnce(currentRoomCode);
+            } else {
+                // Đảm bảo phòng hiện tại cũng được đồng bộ bộ đề đã lưu của giáo viên
+                await syncQuestionsToRoomFirestore();
+            }
+            if (currentUser && db) {
+                subscribeToRoomData(currentRoomCode);
+            }
+            if (openDashboardImmediately) {
+                openTeacherDashboard();
+            }
+        }
+
+        // Cập nhật giao diện theo vai trò (Học sinh vs Giáo viên)
+        function applyRoleUI() {
+            const teacherTools = document.getElementById("teacher-toolbar-group");
+            const btnOpenDashboard = document.getElementById("btn-open-dashboard");
+            const btnTop3Reset = document.getElementById("btn-top3-reset-round");
+            const headerRoomBadge = document.getElementById("header-room-badge");
+            const dashRoomCode = document.getElementById("dash-room-code");
+
+            headerRoomBadge.textContent = `Phòng: ${currentRoomCode}`;
+            dashRoomCode.textContent = currentRoomCode;
+
+            if (userRole === "student") {
+                teacherTools.classList.add("hidden");
+                btnOpenDashboard.classList.add("hidden");
+                if (btnTop3Reset) btnTop3Reset.classList.add("hidden");
+                document.getElementById("display-student-name").textContent = studentProfile.name;
+                document.getElementById("display-student-group").textContent = studentProfile.group;
+                document.getElementById("student-score-display").textContent = studentProfile.score;
+                updateStudentServerSyncBadge("syncing");
+            } else {
+                teacherTools.classList.remove("hidden");
+                btnOpenDashboard.classList.remove("hidden");
+                if (btnTop3Reset) btnTop3Reset.classList.remove("hidden");
+                updateStudentServerSyncBadge("hidden");
+                document.getElementById("display-student-name").textContent = "Giáo viên (Chế độ trình chiếu)";
+                document.getElementById("display-student-group").textContent = "Quản trị viên";
+                document.getElementById("student-score-display").textContent = "—";
+                document.getElementById("student-timer-display").textContent = "Trực tiếp";
+            }
+        }
+
+        // Nút đổi vai trò / quay lại màn hình đăng nhập (khóa lại quyền giáo viên khi đăng xuất)
+        document.getElementById("btn-switch-role").addEventListener("click", () => {
+            stopStudentTimer();
+            isTeacherAuthenticated = false;
+            updateTeacherGateUI();
+            roleLoginScreen.classList.remove("hidden");
+        });
+
+        // Đồng hồ đếm thời gian làm bài của Học sinh (dùng Date.now() thực tế để không bị sai lệch khi chuyển tab/khóa màn hình)
+        function startStudentTimer() {
+            stopStudentTimer();
+            studentProfile.elapsedSeconds = 0;
+            timerStartTimestamp = Date.now();
+            studentProfile.startedAt = timerStartTimestamp;
+            updateTimerUI();
+            timerInterval = setInterval(() => {
+                if (!studentProfile.completed) {
+                    const diffSec = (Date.now() - timerStartTimestamp) / 1000;
+                    studentProfile.elapsedSeconds = Math.max(0, Math.round(diffSec * 10) / 10);
+                    updateTimerUI();
+                }
+            }, 100);
+        }
+
+        function stopStudentTimer() {
+            if (timerStartTimestamp && !studentProfile.completed) {
+                const finalDiffSec = (Date.now() - timerStartTimestamp) / 1000;
+                studentProfile.elapsedSeconds = Math.max(0.1, Math.round(finalDiffSec * 10) / 10);
+                updateTimerUI();
+            }
+            if (timerInterval) {
+                clearInterval(timerInterval);
+                timerInterval = null;
+            }
+        }
+
+        function formatSeconds(sec) {
+            const safeSec = Math.max(0, Number(sec) || 0);
+            const mins = Math.floor(safeSec / 60).toString().padStart(2, "0");
+            const remSec = (safeSec % 60).toFixed(1).padStart(4, "0");
+            return `${mins}:${remSec}s`;
+        }
+
+        function updateTimerUI() {
+            document.getElementById("student-timer-display").textContent = formatSeconds(studentProfile.elapsedSeconds);
+        }
+
+        /**
+         * =========================================================================
+         * QUẢN LÝ ĐỢT THI ĐẤU TỰ DO (KHÔNG GIỚI HẠN THỜI GIAN PHÒNG)
+         * =========================================================================
+         */
+        function updateRoundCountdownUI() {
+            const hRoundNum = document.getElementById("header-round-num");
+            const dRoundNum = document.getElementById("dash-round-num");
+
+            if (hRoundNum) hRoundNum.textContent = currentRoundNumber;
+            if (dRoundNum) dRoundNum.textContent = currentRoundNumber;
+        }
+
+        function startRoundCountdownTicker() {
+            updateRoundCountdownUI();
+        }
+
+        async function resetScoreboardAndStartNewRound(isAutoExpired = false) {
+            if (isResettingRoundInProgress) return;
+            isResettingRoundInProgress = true;
+
+            try {
+                const oldRecords = [...roomStudentsList];
+                localSessionSubmissions.clear();
+                roomStudentsList = [];
+
+                currentRoundNumber = (Number(currentRoundNumber) || 1) + 1;
+                currentRoundStartedAt = Date.now();
+                currentRoundId = `round_${currentRoundNumber}_${currentRoundStartedAt}`;
+                updateRoundCountdownUI();
+
+                // Nếu học sinh đang mở màn hình chơi khi giáo viên mở đợt mới -> đặt lại điểm & thời gian làm bài cá nhân về 0
+                if (userRole === "student" && studentProfile.id) {
+                    const uid = currentUser ? currentUser.uid : "anon";
+                    const safeNameSlug = studentProfile.name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 14) || "hs";
+                    studentProfile.id = `${uid}_${DEVICE_SESSION_ID}_${safeNameSlug}_${currentRoundStartedAt.toString(36)}`;
+                    studentProfile.roundId = currentRoundId;
+                    studentProfile.score = 0;
+                    studentProfile.elapsedSeconds = 0;
+                    studentProfile.startedAt = currentRoundStartedAt;
+                    studentProfile.finishedAt = null;
+                    studentProfile.completed = false;
+
+                    openedTiles = new Array(TOTAL_TILES).fill(false);
+                    questionResults = new Array(TOTAL_TILES).fill("unanswered");
+                    document.getElementById("student-score-display").textContent = "0";
+                    document.getElementById("student-summary-modal").classList.add("hidden");
+                    renderTiles();
+                    startStudentTimer();
+                }
+
+                renderTeacherDashboardTable();
+                if (!document.getElementById("top3-modal").classList.contains("hidden")) {
+                    renderTop3Leaderboard();
+                }
+
+                const ready = await ensureFirebaseAuthenticated();
+                if (ready && currentRoomCode) {
+                    // 1. Xóa toàn bộ bản ghi điểm cũ của đợt trước trên Firestore
+                    if (oldRecords.length > 0) {
+                        const deletePromises = oldRecords.map((stu) => {
+                            const docRef = doc(db, "artifacts", appId, "public", "data", `room_${currentRoomCode}`, stu.id);
+                            return deleteDoc(docRef).catch(() => {});
+                        });
+                        await Promise.all(deletePromises);
+                    }
+
+                    // 2. Lưu thông tin đợt thi mới lên cấu hình phòng
+                    if (userRole === "teacher" || isAutoExpired) {
+                        const configRef = doc(db, "artifacts", appId, "public", "data", `room_config_${currentRoomCode}`, "questions");
+                        await setDoc(configRef, {
+                            roundNumber: currentRoundNumber,
+                            roundStartedAt: currentRoundStartedAt,
+                            roundId: currentRoundId
+                        }, { merge: true });
+                    }
+                }
+
+                if (userRole === "student" && studentProfile.id) {
+                    await syncStudentProgressToFirestore(true);
+                }
+
+                showToast(`🔄 Đã xóa bảng điểm cũ & mở Đợt ${currentRoundNumber} cho lượt thi tiếp theo!`);
+            } catch (err) {
+                console.error("Lỗi khi đặt lại đợt thi đấu:", err);
+                showToast("⚠️ Có lỗi khi đặt lại bảng điểm.");
+            } finally {
+                isResettingRoundInProgress = false;
+            }
+        }
+
+        function sortStudentsRanking(list) {
+            return [...list].sort((a, b) => {
+                // 1. Ưu tiên điểm số cao nhất
+                const scoreDiff = (Number(b.score) || 0) - (Number(a.score) || 0);
+                if (scoreDiff !== 0) return scoreDiff;
+
+                // 2. Ưu tiên số câu mở đúng nhiều nhất
+                const openedDiff = (Number(b.openedCount) || 0) - (Number(a.openedCount) || 0);
+                if (openedDiff !== 0) return openedDiff;
+
+                // 3. Ưu tiên trạng thái đã hoàn thành toàn bộ câu hỏi
+                if (Boolean(b.completed) !== Boolean(a.completed)) {
+                    return b.completed ? 1 : -1;
+                }
+
+                // 4. Ưu tiên thời gian làm bài nhanh nhất (nhỏ hơn xếp trên)
+                const timeA = Number(a.elapsedSeconds) > 0 ? Number(a.elapsedSeconds) : 999999;
+                const timeB = Number(b.elapsedSeconds) > 0 ? Number(b.elapsedSeconds) : 999999;
+                if (Math.abs(timeA - timeB) >= 0.05) {
+                    return timeA - timeB;
+                }
+
+                // 5. Nếu bằng cả điểm lẫn thời gian, ưu tiên người nộp bài sớm hơn
+                return (Number(a.finishedAt || a.updatedAt) || 0) - (Number(b.finishedAt || b.updatedAt) || 0);
+            });
+        }
+
+        function buildCurrentStudentPayload() {
+            const openedCount = openedTiles.filter(Boolean).length;
+            const isAllOpened = openedCount >= TOTAL_TILES;
+            if (isAllOpened && !studentProfile.completed) {
+                studentProfile.completed = true;
+                studentProfile.finishedAt = Date.now();
+            }
+            return {
+                id: studentProfile.id,
+                name: studentProfile.name,
+                group: studentProfile.group,
+                roomCode: currentRoomCode,
+                roundId: studentProfile.roundId || currentRoundId,
+                score: Number(studentProfile.score) || 0,
+                openedCount: openedCount,
+                elapsedSeconds: Number(studentProfile.elapsedSeconds) || 0,
+                startedAt: studentProfile.startedAt || Date.now(),
+                finishedAt: studentProfile.finishedAt || null,
+                completed: Boolean(studentProfile.completed),
+                questionResults: [...questionResults],
+                updatedAt: Date.now()
+            };
+        }
+
+        function upsertLocalStudentRecord(payload) {
+            if (!payload || !payload.id) return;
+            localSessionSubmissions.set(payload.id, payload);
+            const idx = roomStudentsList.findIndex(s => s.id === payload.id);
+            if (idx >= 0) {
+                roomStudentsList[idx] = { ...roomStudentsList[idx], ...payload };
+            } else {
+                roomStudentsList.push(payload);
+            }
+            roomStudentsList = sortStudentsRanking(roomStudentsList);
+            renderTeacherDashboardTable();
+        }
+
+        async function syncStudentProgressToFirestore(immediate = false) {
+            if (userRole !== "student" || !studentProfile.id) return;
+
+            const payload = buildCurrentStudentPayload();
+            // Cập nhật ngay trên giao diện cục bộ để người chơi thấy ngay thứ hạng chuẩn
+            upsertLocalStudentRecord(payload);
+            updateStudentServerSyncBadge("syncing");
+
+            // Đảm bảo đã xác thực Firebase trước khi ghi dữ liệu (Rule 3)
+            const authed = await ensureFirebaseAuthenticated();
+            if (!authed || !currentUser || !db) {
+                updateStudentServerSyncBadge("error");
+                return;
+            }
+
+            // Hàng đợi tuần tự: tránh các gói tin gửi chồng chéo làm ghi đè trạng thái cũ lên trạng thái mới
+            if (isSyncInFlight) {
+                hasQueuedSync = true;
+                return;
+            }
+
+            const flushWrite = async (retryCount = 0) => {
+                isSyncInFlight = true;
+                const latestPayload = buildCurrentStudentPayload();
+                try {
+                    const docRef = doc(db, "artifacts", appId, "public", "data", `room_${currentRoomCode}`, latestPayload.id);
+                    await setDoc(docRef, latestPayload, { merge: true });
+                    isSyncInFlight = false;
+                    updateStudentServerSyncBadge("synced");
+
+                    if (hasQueuedSync) {
+                        hasQueuedSync = false;
+                        await flushWrite(0);
+                    }
+                } catch (error) {
+                    console.error("Lỗi đồng bộ tiến độ học sinh lên Firestore:", error);
+                    isSyncInFlight = false;
+                    updateStudentServerSyncBadge("error");
+                    if (retryCount < 5) {
+                        // Thêm độ trễ ngẫu nhiên (jitter) để 40 học sinh không gửi trùng một thời điểm khi mạng lớp học nghẽn
+                        const jitterMs = Math.floor(Math.random() * 350);
+                        setTimeout(() => flushWrite(retryCount + 1), 400 * (retryCount + 1) + jitterMs);
+                    }
+                }
+            };
+
+            await flushWrite(0);
+        }
+
+        // Nhịp đồng bộ dự phòng mỗi 5 giây trên điện thoại học sinh để đảm bảo điểm & thời gian luôn về máy chủ GV
+        setInterval(() => {
+            if (userRole === "student" && studentProfile.id && !studentProfile.completed) {
+                syncStudentProgressToFirestore(false);
+            }
+        }, 5000);
+        function subscribeToRoomData(roomCode) {
+            if (!currentUser || !db) return;
+
+            if (unsubscribeRoomListener) {
+                unsubscribeRoomListener();
+            }
+            if (unsubscribeQuestionsListener) {
+                unsubscribeQuestionsListener();
+            }
+
+            // Lắng nghe bộ câu hỏi giáo viên đã cập nhật cho phòng này (đồng bộ tức thì sang máy học sinh)
+            const qConfigRef = doc(db, "artifacts", appId, "public", "data", `room_config_${roomCode}`, "questions");
+            unsubscribeQuestionsListener = onSnapshot(
+                qConfigRef,
+                (docSnap) => {
+                    if (docSnap.exists()) {
+                        const data = docSnap.data();
+                        const remoteQTime = Number(data.updatedAt) || 0;
+                        // Chỉ cập nhật từ đám mây nếu dữ liệu đám mây MỚI HƠN dữ liệu giáo viên vừa tải từ Word
+                        if (Array.isArray(data.questions) && data.questions.length === TOTAL_TILES && remoteQTime > localQuestionsUpdatedAt) {
+                            questions = data.questions;
+                            localQuestionsUpdatedAt = remoteQTime;
+                            updateSavedCloudStatusBadge(data.title || `Đề phòng ${roomCode}`, remoteQTime);
+                            // Nếu đang mở modal chỉnh sửa hoặc modal câu hỏi thì cập nhật lại giao diện ngay
+                            if (!editorModal.classList.contains("hidden")) {
+                                renderEditorForms();
+                            }
+                            if (activeTileIndex !== null && !document.getElementById("question-modal").classList.contains("hidden")) {
+                                openQuestionModal(activeTileIndex);
+                            }
+                        }
+                        // Đồng bộ ảnh bức tranh bí mật nếu giáo viên đã cập nhật cho phòng
+                        const remoteImgTime = Number(data.imageUpdatedAt) || 0;
+                        if (typeof data.secretImage === "string" && remoteImgTime > localImageUpdatedAt) {
+                            localImageUpdatedAt = remoteImgTime;
+                            applySecretImage(data.secretImage, false);
+                        }
+                    }
+                },
+                (err) => {
+                    console.warn("Lỗi lắng nghe câu hỏi phòng:", err);
+                }
+            );
+
+            // Truy vấn đơn giản toàn bộ collection phòng (không dùng orderBy/where phức tạp - Rule 2)
+            const colRef = collection(db, "artifacts", appId, "public", "data", `room_${roomCode}`);
+
+            unsubscribeRoomListener = onSnapshot(
+                colRef,
+                (snapshot) => {
+                    const mergedMap = new Map();
+                    // Giữ lại dữ liệu mới nhất của phiên hiện tại nếu đang chờ đồng bộ
+                    localSessionSubmissions.forEach((val, key) => {
+                        if (val.roomCode === roomCode) mergedMap.set(key, val);
+                    });
+
+                    snapshot.forEach((docSnap) => {
+                        const data = docSnap.data();
+                        if (data && data.id) {
+                            const existing = mergedMap.get(data.id);
+                            if (!existing || (data.updatedAt || 0) >= (existing.updatedAt || 0)) {
+                                mergedMap.set(data.id, data);
+                            }
+                        }
+                    });
+
+                    roomStudentsList = sortStudentsRanking(Array.from(mergedMap.values()));
+                    renderTeacherDashboardTable();
+                    if (!document.getElementById("top3-modal").classList.contains("hidden")) {
+                        renderTop3Leaderboard();
+                    }
+                },
+                (error) => {
+                    console.error("Lỗi lắng nghe dữ liệu phòng Firestore:", error);
+                }
+            );
+        }
+
+        /**
+         * =========================================================================
+         * PHẦN 7B: TỔNG KẾT CÁ NHÂN & BẢNG VÀNG VINH DANH TOP 3 XUẤT SẮC NHẤT
+         * =========================================================================
+         */
+        function getTop3Students() {
+            const sorted = sortStudentsRanking(roomStudentsList);
+            return sorted.slice(0, 3);
+        }
+
+        function openStudentSummaryModal() {
+            const modal = document.getElementById("student-summary-modal");
+            document.getElementById("summary-student-name").textContent = studentProfile.name;
+            document.getElementById("summary-student-group").textContent = `${studentProfile.group} • Phòng ${currentRoomCode}`;
+            document.getElementById("summary-score").textContent = `${studentProfile.score} đ`;
+            document.getElementById("summary-time").textContent = formatSeconds(studentProfile.elapsedSeconds);
+
+            // Tính thứ hạng hiện tại của học sinh trong phòng
+            const rankIdx = roomStudentsList.findIndex(s => s.id === studentProfile.id);
+            const currentRank = rankIdx !== -1 ? rankIdx + 1 : 1;
+            document.getElementById("summary-rank").textContent = `#${currentRank}`;
+
+            modal.classList.remove("hidden");
+        }
+
+        document.getElementById("btn-close-summary-modal").addEventListener("click", () => {
+            document.getElementById("student-summary-modal").classList.add("hidden");
+        });
+
+        document.getElementById("btn-summary-view-top3").addEventListener("click", () => {
+            document.getElementById("student-summary-modal").classList.add("hidden");
+            openTop3Modal();
+        });
+
+        function openTop3Modal() {
+            document.getElementById("top3-room-code").textContent = currentRoomCode;
+            if (currentUser && db && currentRoomCode) {
+                subscribeToRoomData(currentRoomCode);
+            }
+            renderTop3Leaderboard();
+            document.getElementById("top3-modal").classList.remove("hidden");
+            if (getTop3Students().length > 0) {
+                launchConfetti();
+            }
+        }
+
+        document.getElementById("btn-open-top3").addEventListener("click", openTop3Modal);
+        document.getElementById("btn-dash-to-top3").addEventListener("click", () => {
+            dashboardModal.classList.add("hidden");
+            openTop3Modal();
+        });
+        document.getElementById("btn-close-top3").addEventListener("click", () => {
+            document.getElementById("top3-modal").classList.add("hidden");
+        });
+
+        function renderTop3Leaderboard() {
+            const container = document.getElementById("top3-content-area");
+            const top3 = getTop3Students();
+
+            if (top3.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center py-14 px-4 bg-white/5 rounded-2xl border border-white/10">
+                        <div class="text-5xl mb-3">⏳</div>
+                        <p class="text-lg font-bold text-amber-200">Chưa có dữ liệu học sinh tham gia phòng này.</p>
+                        <p class="text-sm text-indigo-200 mt-1">Khi học sinh bắt đầu và hoàn thành lượt chơi, Bảng Vàng Top 3 sẽ tự động vinh danh tại đây!</p>
+                    </div>
+                `;
+                return;
+            }
+
+            // Bục vinh danh Top 1, Top 2, Top 3 (Hạng 2 bên trái - Hạng 1 ở giữa cao nhất - Hạng 3 bên phải)
+            const podiumOrder = [
+                { data: top3[1], rank: 2, medal: "🥈", title: "Á Quân", heightClass: "sm:min-h-[250px]", bgGrad: "from-slate-300/25 to-slate-400/10 border-slate-300/60", badgeBg: "bg-slate-200 text-slate-900" },
+                { data: top3[0], rank: 1, medal: "🥇", title: "Quán Quân", heightClass: "sm:min-h-[295px]", bgGrad: "from-amber-400/35 to-yellow-500/15 border-amber-400", badgeBg: "bg-amber-400 text-slate-950" },
+                { data: top3[2], rank: 3, medal: "🥉", title: "Quý Quân", heightClass: "sm:min-h-[225px]", bgGrad: "from-orange-400/25 to-amber-700/15 border-orange-400/60", badgeBg: "bg-orange-400 text-slate-950" }
+            ];
+
+            container.innerHTML = `
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-5 items-end">
+                    ${podiumOrder.map(item => {
+                        if (!item.data) {
+                            return `<div class="hidden sm:flex flex-col items-center justify-center p-5 rounded-3xl border border-dashed border-white/15 bg-white/5 ${item.heightClass} text-indigo-300/50 text-xs font-bold">Vị trí #${item.rank} đang chờ</div>`;
+                        }
+                        const stu = item.data;
+                        const isTop1 = item.rank === 1;
+                        return `
+                            <div class="relative flex flex-col items-center justify-between p-5 sm:p-6 rounded-3xl border-2 bg-gradient-to-b ${item.bgGrad} ${item.heightClass} ${isTop1 ? "shadow-2xl shadow-amber-500/25 order-first sm:order-none" : ""}">
+                                <div class="flex flex-col items-center">
+                                    <div class="text-5xl sm:text-6xl mb-1.5 drop-shadow">${item.medal}</div>
+                                    <span class="${item.badgeBg} font-black text-xs uppercase tracking-wider px-3.5 py-1 rounded-full mb-3 shadow-sm">
+                                        Hạng ${item.rank} • ${item.title}
+                                    </span>
+                                    <h3 class="text-xl sm:text-2xl font-black text-white text-center line-clamp-2">
+                                        ${escapeHtml(stu.name || "Ẩn danh")}
+                                    </h3>
+                                    <p class="text-xs sm:text-sm font-bold text-indigo-200 mt-1 mb-4">
+                                        ${escapeHtml(stu.group || "")} • ${stu.openedCount || 0}/15 mảnh
+                                    </p>
+                                </div>
+                                <div class="w-full grid grid-cols-2 gap-2.5 bg-slate-950/60 rounded-2xl p-3 text-center border border-white/10">
+                                    <div>
+                                        <span class="block text-[11px] uppercase text-indigo-300 font-bold">Điểm số</span>
+                                        <strong class="text-lg sm:text-xl font-black text-emerald-400">${stu.score || 0} đ</strong>
+                                    </div>
+                                    <div>
+                                        <span class="block text-[11px] uppercase text-indigo-300 font-bold">Thời gian</span>
+                                        <strong class="text-base sm:text-lg font-black font-mono text-amber-300">${formatSeconds(stu.elapsedSeconds || 0)}</strong>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    }).join("")}
+                </div>
+            `;
+        }
+
+        // Xuất danh sách Top 3 ra file CSV tuyên dương
+        document.getElementById("btn-export-top3-csv").addEventListener("click", () => {
+            const top3 = getTop3Students();
+            if (top3.length === 0) {
+                showToast("⚠️ Chưa có dữ liệu Top 3 để xuất file!");
+                return;
+            }
+
+            const headers = ["Thứ hạng", "Họ và tên", "Nhóm / Lớp", "Mã phòng", "Số mảnh mở", "Điểm số", "Thời gian hoàn thành"];
+            const rows = top3.map((stu, idx) => [
+                `Hạng ${idx + 1}`,
+                `"${(stu.name || "").replace(/"/g, '""')}"`,
+                `"${(stu.group || "").replace(/"/g, '""')}"`,
+                currentRoomCode,
+                `${stu.openedCount || 0}/15`,
+                stu.score || 0,
+                formatSeconds(stu.elapsedSeconds || 0)
+            ].join(","));
+
+            const csvContent = "\uFEFF" + [headers.join(","), ...rows].join("\n");
+            const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+            const url = URL.createObjectURL(blob);
+
+            const link = document.createElement("a");
+            link.href = url;
+            link.setAttribute("download", `BangVang_Top3_${currentRoomCode}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+
+            showToast("🏆 Đã tải xuống danh sách Bảng Vàng Top 3 (.CSV)!");
+        });
+
+        /**
+         * =========================================================================
+         * PHẦN 8: BẢNG ĐIỀU KHIỂN GIÁO VIÊN (TEACHER DASHBOARD) & XUẤT EXCEL CSV
+         * =========================================================================
+         */
+        const dashboardModal = document.getElementById("teacher-dashboard-modal");
+
+        function openTeacherDashboard() {
+            if (!isTeacherAuthenticated) {
+                showToast("🔒 Vui lòng đăng nhập bằng mật khẩu Giáo viên!");
+                return;
+            }
+            document.getElementById("dash-room-code").textContent = currentRoomCode;
+            renderTeacherDashboardTable();
+            dashboardModal.classList.remove("hidden");
+        }
+
+        document.getElementById("btn-open-dashboard").addEventListener("click", openTeacherDashboard);
+        document.getElementById("btn-close-dashboard").addEventListener("click", () => {
+            dashboardModal.classList.add("hidden");
+            document.getElementById("confirm-clear-box").classList.add("hidden");
+        });
+
+        function renderTeacherDashboardTable() {
+            const tbody = document.getElementById("dashboard-students-tbody");
+            const totalBadge = document.getElementById("online-students-badge");
+            const dashTotal = document.getElementById("dash-total-students");
+            const dashCompleted = document.getElementById("dash-completed-students");
+            const dashAvgScore = document.getElementById("dash-avg-score");
+
+            totalBadge.textContent = roomStudentsList.length;
+            dashTotal.textContent = roomStudentsList.length;
+
+            if (roomStudentsList.length === 0) {
+                dashCompleted.textContent = "0";
+                dashAvgScore.textContent = "0";
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="8" class="py-12 text-center text-slate-400 font-medium">
+                            Chưa có học sinh nào tham gia phòng <strong>${currentRoomCode}</strong>. Hãy chiếu mã phòng để học sinh đăng nhập!
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+
+            let completedCount = 0;
+            let sumScore = 0;
+
+            tbody.innerHTML = "";
+            roomStudentsList.forEach((stu, idx) => {
+                if (stu.completed) completedCount++;
+                sumScore += (stu.score || 0);
+
+                // Huy chương xếp hạng Top 1, 2, 3
+                let rankDisplay = `<span class="font-bold text-slate-600">#${idx + 1}</span>`;
+                if (idx === 0) rankDisplay = `<span class="text-xl" title="Hạng Nhất">🥇</span>`;
+                else if (idx === 1) rankDisplay = `<span class="text-xl" title="Hạng Nhì">🥈</span>`;
+                else if (idx === 2) rankDisplay = `<span class="text-xl" title="Hạng Ba">🥉</span>`;
+                // 15 ô nhỏ hiển thị chi tiết từng câu
+                const resultsArr = Array.isArray(stu.questionResults) ? stu.questionResults : new Array(TOTAL_TILES).fill("unanswered");
+                const miniCellsHtml = Array.from({ length: TOTAL_TILES }, (_, qIdx) => {
+                    const status = resultsArr[qIdx] || "unanswered";
+                    let cellColor = "bg-slate-200 text-slate-600";
+                    let titleText = `Câu ${qIdx + 1}: Chưa làm`;
+                    if (status === "correct") {
+                        cellColor = "bg-emerald-500 text-white";
+                        titleText = `Câu ${qIdx + 1}: Đúng`;
+                    } else if (status === "wrong") {
+                        cellColor = "bg-rose-500 text-white";
+                        titleText = `Câu ${qIdx + 1}: Sai`;
+                    }
+                    return `<span title="${titleText}" class="w-5 h-5 rounded text-[11px] font-extrabold inline-flex items-center justify-center ${cellColor}">${qIdx + 1}</span>`;
+                }).join("");
+
+                const statusBadge = stu.completed
+                    ? `<span class="bg-emerald-100 text-emerald-800 font-bold px-2.5 py-1 rounded-full text-xs">✅ Hoàn thành</span>`
+                    : `<span class="bg-amber-100 text-amber-800 font-bold px-2.5 py-1 rounded-full text-xs">⏳ Đang làm</span>`;
+
+                const tr = document.createElement("tr");
+                tr.className = "hover:bg-indigo-50/40 transition";
+                tr.innerHTML = `
+                    <td class="py-3 px-4 text-center">${rankDisplay}</td>
+                    <td class="py-3 px-4 font-bold text-slate-900">${escapeHtml(stu.name || "Ẩn danh")}</td>
+                    <td class="py-3 px-4">
+                        <span class="bg-indigo-100 text-indigo-800 font-bold px-2.5 py-1 rounded-lg text-xs">${escapeHtml(stu.group || "")}</span>
+                    </td>
+                    <td class="py-3 px-4 text-center font-extrabold text-indigo-700">${stu.openedCount || 0}/15</td>
+                    <td class="py-3 px-4 text-center font-black text-emerald-600 text-base">${stu.score || 0}</td>
+                    <td class="py-3 px-4 text-center font-mono text-slate-700">${formatSeconds(stu.elapsedSeconds || 0)}</td>
+                    <td class="py-3 px-4">
+                        <div class="flex items-center gap-1 flex-wrap">${miniCellsHtml}</div>
+                    </td>
+                    <td class="py-3 px-4 text-center">${statusBadge}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+
+            dashCompleted.textContent = completedCount;
+            dashAvgScore.textContent = (sumScore / roomStudentsList.length).toFixed(1);
+        }
+
+        // Tạo mã phòng mới ngẫu nhiên
+        document.getElementById("btn-new-room-code").addEventListener("click", () => {
+            const randomNum = Math.floor(100 + Math.random() * 900);
+            currentRoomCode = `HOA${randomNum}`;
+            document.getElementById("dash-room-code").textContent = currentRoomCode;
+            document.getElementById("header-room-badge").textContent = `Phòng: ${currentRoomCode}`;
+            document.getElementById("teacher-room-display").textContent = currentRoomCode;
+            document.getElementById("student-room-input").value = currentRoomCode;
+
+            roomStudentsList = [];
+            renderTeacherDashboardTable();
+            if (currentUser && db) {
+                subscribeToRoomData(currentRoomCode);
+            }
+            showToast(`🎲 Đã tạo mã phòng mới: ${currentRoomCode}`);
+        });
+
+        // Xóa dữ liệu phòng hiện tại (kèm hộp xác nhận nội bộ)
+        document.getElementById("btn-clear-room-data").addEventListener("click", () => {
+            document.getElementById("confirm-room-label").textContent = currentRoomCode;
+            document.getElementById("confirm-clear-box").classList.remove("hidden");
+        });
+
+        document.getElementById("btn-confirm-clear-no").addEventListener("click", () => {
+            document.getElementById("confirm-clear-box").classList.add("hidden");
+        });
+
+        document.getElementById("btn-confirm-clear-yes").addEventListener("click", async () => {
+            document.getElementById("confirm-clear-box").classList.add("hidden");
+            localSessionSubmissions.clear();
+            if (!currentUser || !db) return;
+
+            try {
+                const deletePromises = roomStudentsList.map((stu) => {
+                    const docRef = doc(db, "artifacts", appId, "public", "data", `room_${currentRoomCode}`, stu.id);
+                    return deleteDoc(docRef);
+                });
+                await Promise.all(deletePromises);
+                showToast(`🗑️ Đã xóa toàn bộ dữ liệu lượt chơi phòng ${currentRoomCode}!`);
+            } catch (err) {
+                console.error("Lỗi khi xóa dữ liệu phòng:", err);
+                showToast("⚠️ Có lỗi khi xóa dữ liệu phòng.");
+            }
+        });
+
+        // Xuất kết quả ra file CSV mở được bằng Excel (có BOM UTF-8 hỗ trợ tiếng Việt chuẩn)
+        document.getElementById("btn-export-csv").addEventListener("click", () => {
+            if (roomStudentsList.length === 0) {
+                showToast("⚠️ Chưa có dữ liệu học sinh để xuất file!");
+                return;
+            }
+
+            const headers = [
+                "Xếp hạng", "Họ và tên", "Nhóm / Lớp", "Mã phòng",
+                "Số mảnh đã mở", "Điểm số", "Thời gian (giây)", "Trạng thái",
+                ...Array.from({ length: TOTAL_TILES }, (_, i) => `Câu ${i + 1}`)
+            ];
+
+            const rows = roomStudentsList.map((stu, idx) => {
+                const res = Array.isArray(stu.questionResults) ? stu.questionResults : new Array(TOTAL_TILES).fill("unanswered");
+                const resLabels = Array.from({ length: TOTAL_TILES }, (_, i) => {
+                    const r = res[i];
+                    return r === "correct" ? "Đúng" : (r === "wrong" ? "Sai" : "Chưa làm");
+                });
+                return [
+                    idx + 1,
+                    `"${(stu.name || "").replace(/"/g, '""')}"`,
+                    `"${(stu.group || "").replace(/"/g, '""')}"`,
+                    currentRoomCode,
+                    `${stu.openedCount || 0}/15`,
+                    stu.score || 0,
+                    stu.elapsedSeconds || 0,
+                    stu.completed ? "Hoàn thành" : "Đang làm",
+                    ...resLabels
+                ].join(",");
+            });
+
+            const csvContent = "\uFEFF" + [headers.join(","), ...rows].join("\n");
+            const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+            const url = URL.createObjectURL(blob);
+
+            const link = document.createElement("a");
+            link.href = url;
+            link.setAttribute("download", `KetQua_LatManhGhep_${currentRoomCode}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+
+            showToast("📥 Đã tải xuống file bảng điểm Excel (.CSV)!");
+        });
+
+        /**
+         * =========================================================================
+         * PHẦN 9: CÁC CHỨC NĂNG CÀI ĐẶT CỦA GIÁO VIÊN (ẢNH BÍ MẬT, SỬA CÂU HỎI)
+         * =========================================================================
+         */
+        // Nén ảnh thông minh để lưu trữ bền vững & đồng bộ mượt mà sang tất cả điện thoại học sinh
+        function compressImageDataUrl(file, maxWidth = 1280, quality = 0.82) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onerror = () => reject(new Error("Không đọc được file ảnh."));
+                reader.onload = (e) => {
+                    const img = new Image();
+                    img.onerror = () => reject(new Error("Định dạng ảnh không hợp lệ."));
+                    img.onload = () => {
+                        let targetW = img.width;
+                        let targetH = img.height;
+                        if (targetW > maxWidth) {
+                            targetH = Math.round((targetH * maxWidth) / targetW);
+                            targetW = maxWidth;
+                        }
+                        const canvas = document.createElement("canvas");
+                        canvas.width = targetW;
+                        canvas.height = targetH;
+                        const ctx = canvas.getContext("2d");
+                        ctx.drawImage(img, 0, 0, targetW, targetH);
+                        resolve(canvas.toDataURL("image/jpeg", quality));
+                    };
+                    img.src = e.target.result;
+                };
+                reader.readAsDataURL(file);
+            });
+        }
+
+        function applySecretImage(imageDataUrl, saveLocal = true) {
+            const customImg = document.getElementById("custom-secret-img");
+            const defaultSvg = document.getElementById("default-svg-art");
+            const resetBtn = document.getElementById("btn-reset-bg-image");
+
+            currentSecretImageData = imageDataUrl || "";
+
+            if (currentSecretImageData) {
+                customImg.src = currentSecretImageData;
+                customImg.classList.remove("hidden");
+                defaultSvg.classList.add("hidden");
+                if (resetBtn) resetBtn.classList.remove("hidden");
+            } else {
+                customImg.src = "";
+                customImg.classList.add("hidden");
+                defaultSvg.classList.remove("hidden");
+                if (resetBtn) resetBtn.classList.add("hidden");
+            }
+
+            if (saveLocal) {
+                // Lưu trữ thông qua đồng bộ đám mây của phòng (không dùng localStorage)
+                currentSecretImageData = imageDataUrl || "";
+            }
+        }
+
+        function loadSavedSecretImage() {
+            // Ảnh bí mật được tải tự động từ cấu hình phòng trên đám mây (fetchRoomConfigOnce)
+            if (currentSecretImageData) {
+                applySecretImage(currentSecretImageData, false);
+            }
+        }
+
+        async function syncSecretImageToRoomFirestore(imageDataUrl) {
+            if (!currentRoomCode) return false;
+            const ready = await ensureFirebaseAuthenticated();
+            if (!ready) return false;
+            try {
+                const configRef = doc(db, "artifacts", appId, "public", "data", `room_config_${currentRoomCode}`, "questions");
+                await setDoc(configRef, {
+                    secretImage: imageDataUrl || "",
+                    imageUpdatedAt: Date.now()
+                }, { merge: true });
+                return true;
+            } catch (err) {
+                console.warn("Không đồng bộ được ảnh bí mật lên phòng:", err);
+                return false;
+            }
+        }
+
+        document.getElementById("upload-bg-input").addEventListener("change", async function (event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            try {
+                showToast("⏳ Đang tối ưu và lưu bức tranh bí mật...");
+                // Giữ kích thước tối ưu <= 750KB để lưu trọn vẹn trên cả localStorage lẫn Firestore (giới hạn 1MB/doc)
+                let compressedDataUrl = await compressImageDataUrl(file, 1024, 0.78);
+                if (compressedDataUrl.length > 750000) {
+                    compressedDataUrl = await compressImageDataUrl(file, 800, 0.65);
+                }
+                applySecretImage(compressedDataUrl, true);
+                const cloudSaved = await syncSecretImageToRoomFirestore(compressedDataUrl);
+                if (cloudSaved) {
+                    showToast(`💾 Đã lưu vĩnh viễn & đồng bộ tranh bí mật cho phòng ${currentRoomCode}!`);
+                } else {
+                    showToast("💾 Đã lưu bức tranh bí mật trên trình duyệt!");
+                }
+            } catch (err) {
+                console.error("Lỗi khi lưu ảnh bí mật:", err);
+                showToast("⚠️ Không thể tải ảnh này, vui lòng thử ảnh khác.");
+            } finally {
+                event.target.value = "";
+            }
+        });
+
+        document.getElementById("btn-reset-bg-image").addEventListener("click", async () => {
+            applySecretImage("", true);
+            await syncSecretImageToRoomFirestore("");
+            showToast("↩️ Đã khôi phục bức tranh mặc định 20/11!");
+        });
+
+        // Xuất toàn bộ trò chơi hiện tại (bao gồm 15 câu hỏi mới từ Word + bức tranh bí mật) thành file .HTML độc lập
+        document.getElementById("btn-export-game-bundle").addEventListener("click", async () => {
+            persistQuestionsLocally();
+            await syncQuestionsToRoomFirestore();
+            if (currentSecretImageData) {
+                await syncSecretImageToRoomFirestore(currentSecretImageData);
+            }
+
+            try {
+                // Lấy toàn bộ mã nguồn HTML hiện tại và nhúng cứng bộ câu hỏi + bức tranh bí mật vào bên trong
+                const clonedDoc = document.documentElement.cloneNode(true);
+
+                // Xóa các trạng thái tạm thời của phiên đang mở (để khi mở file mới sẽ vào thẳng màn hình đăng nhập sạch sẽ)
+                const loginScreen = clonedDoc.querySelector("#role-login-screen");
+                if (loginScreen) loginScreen.classList.remove("hidden");
+                const qModal = clonedDoc.querySelector("#question-modal");
+                if (qModal) qModal.classList.add("hidden");
+                const edModal = clonedDoc.querySelector("#editor-modal");
+                if (edModal) edModal.classList.add("hidden");
+                const dashModal = clonedDoc.querySelector("#teacher-dashboard-modal");
+                if (dashModal) dashModal.classList.add("hidden");
+                const top3Modal = clonedDoc.querySelector("#top3-modal");
+                if (top3Modal) top3Modal.classList.add("hidden");
+                const summaryModal = clonedDoc.querySelector("#student-summary-modal");
+                if (summaryModal) summaryModal.classList.add("hidden");
+                const tilesGrid = clonedDoc.querySelector("#tiles-grid");
+                if (tilesGrid) tilesGrid.innerHTML = "";
+
+                // Chèn thẻ script chứa dữ liệu đã lưu (15 câu hỏi + bức tranh bí mật) ngay trước thẻ </head>
+                const existingSeedScript = clonedDoc.querySelector("#bundled-game-seed-data");
+                if (existingSeedScript) existingSeedScript.remove();
+
+                const seedScript = document.createElement("script");
+                seedScript.id = "bundled-game-seed-data";
+                const safeQuestionsJson = JSON.stringify(questions).replace(/<\//g, "<\\/");
+                const safeImageJson = JSON.stringify(currentSecretImageData || "").replace(/<\//g, "<\\/");
+                const safeFirebaseCfg = typeof __firebase_config !== "undefined" ? __firebase_config.replace(/<\//g, "<\\/") : "null";
+                seedScript.textContent = `window.__BUNDLED_GAME_DATA__ = { questions: ${safeQuestionsJson}, secretImage: ${safeImageJson}, roomCode: ${JSON.stringify(currentRoomCode)}, firebaseConfig: ${safeFirebaseCfg} }; if (typeof __firebase_config === "undefined" && ${safeFirebaseCfg}) { window.__firebase_config = JSON.stringify(${safeFirebaseCfg}); }`;
+                clonedDoc.querySelector("head").appendChild(seedScript);
+
+                const fullHtml = "<!DOCTYPE html>\n" + clonedDoc.outerHTML;
+                const blob = new Blob([fullHtml], { type: "text/html;charset=utf-8" });
+                const url = URL.createObjectURL(blob);
+
+                const link = document.createElement("a");
+                link.href = url;
+                link.setAttribute("download", "index.html");
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(url);
+
+                showToast(`📲 Đã lưu bản thi đấu online chuẩn tên "index.html" (kèm cấu hình phòng ${currentRoomCode})!`);
+            } catch (err) {
+                console.error("Lỗi xuất file gói trò chơi:", err);
+                showToast("⚠️ Có lỗi khi đóng gói file trò chơi.");
+            }
+        });
+
+        document.getElementById("btn-reveal-all").addEventListener("click", () => {
+            openedTiles = new Array(TOTAL_TILES).fill(true);
+            document.querySelectorAll(".tile-container").forEach((el, idx) => {
+                setTimeout(() => {
+                    el.classList.add("revealed");
+                }, idx * 45);
+            });
+            updateOpenedCounter();
+            playVictoryFanfare();
+            launchConfetti();
+            showToast("✨ Đã mở toàn bộ bức tranh!");
+        });
+
+        document.getElementById("btn-reset-game").addEventListener("click", () => {
+            openedTiles = new Array(TOTAL_TILES).fill(false);
+            renderTiles();
+            showToast("🔄 Đã đóng lại tất cả mảnh ghép!");
+        });
+
+        /**
+         * =========================================================================
+         * PHẦN 9B: LÕI TRÒ CHƠI (TẢI CÂU HỎI, VẼ LƯỚI MẢNH GHÉP, TRẢ LỜI, ÂM THANH)
+         * =========================================================================
+         */
+        let audioCtx = null;
+        function getAudioContext() {
+            if (!audioCtx) {
+                const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+                if (AudioContextClass) audioCtx = new AudioContextClass();
+            }
+            if (audioCtx && audioCtx.state === "suspended") {
+                audioCtx.resume();
+            }
+            return audioCtx;
+        }
+
+        function playSoundEffect(type) {
+            try {
+                const ctx = getAudioContext();
+                if (!ctx) return;
+                const now = ctx.currentTime;
+
+                if (type === "correct") {
+                    const notes = [523.25, 659.25, 783.99, 1046.5];
+                    notes.forEach((freq, i) => {
+                        const osc = ctx.createOscillator();
+                        const gain = ctx.createGain();
+                        osc.type = "triangle";
+                        osc.frequency.setValueAtTime(freq, now + i * 0.08);
+                        gain.gain.setValueAtTime(0.18, now + i * 0.08);
+                        gain.gain.exponentialRampToValueAtTime(0.001, now + i * 0.08 + 0.35);
+                        osc.connect(gain);
+                        gain.connect(ctx.destination);
+                        osc.start(now + i * 0.08);
+                        osc.stop(now + i * 0.08 + 0.35);
+                    });
+                } else if (type === "wrong") {
+                    const osc = ctx.createOscillator();
+                    const gain = ctx.createGain();
+                    osc.type = "sawtooth";
+                    osc.frequency.setValueAtTime(190, now);
+                    osc.frequency.linearRampToValueAtTime(130, now + 0.3);
+                    gain.gain.setValueAtTime(0.18, now);
+                    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.32);
+                    osc.connect(gain);
+                    gain.connect(ctx.destination);
+                    osc.start(now);
+                    osc.stop(now + 0.32);
+                }
+            } catch (e) {
+                console.warn("Audio skipped:", e);
+            }
+        }
+
+        function playVictoryFanfare() {
+            try {
+                const ctx = getAudioContext();
+                if (!ctx) return;
+                const now = ctx.currentTime;
+                const melody = [
+                    { f: 523.25, t: 0, d: 0.14 },
+                    { f: 659.25, t: 0.14, d: 0.14 },
+                    { f: 783.99, t: 0.28, d: 0.14 },
+                    { f: 1046.5, t: 0.44, d: 0.45 },
+                    { f: 783.99, t: 0.92, d: 0.16 },
+                    { f: 1046.5, t: 1.12, d: 0.65 }
+                ];
+                melody.forEach((n) => {
+                    const osc = ctx.createOscillator();
+                    const gain = ctx.createGain();
+                    osc.type = "triangle";
+                    osc.frequency.setValueAtTime(n.f, now + n.t);
+                    gain.gain.setValueAtTime(0.22, now + n.t);
+                    gain.gain.exponentialRampToValueAtTime(0.001, now + n.t + n.d);
+                    osc.connect(gain);
+                    gain.connect(ctx.destination);
+                    osc.start(now + n.t);
+                    osc.stop(now + n.t + n.d);
+                });
+            } catch (e) {
+                console.warn("Fanfare skipped:", e);
+            }
+        }
+
+        function launchConfetti() {
+            const canvas = document.getElementById("confetti-canvas");
+            if (!canvas) return;
+            const ctx = canvas.getContext("2d");
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+
+            const colors = ["#f43f5e", "#f59e0b", "#10b981", "#3b82f6", "#8b5cf6", "#ec4899", "#fde047"];
+            const pieces = Array.from({ length: 130 }, () => ({
+                x: Math.random() * canvas.width,
+                y: Math.random() * canvas.height - canvas.height,
+                w: 8 + Math.random() * 8,
+                h: 6 + Math.random() * 6,
+                color: colors[Math.floor(Math.random() * colors.length)],
+                vx: (Math.random() - 0.5) * 4,
+                vy: 2.5 + Math.random() * 4.5,
+                rot: Math.random() * 360,
+                vRot: (Math.random() - 0.5) * 8
+            }));
+
+            let frame = 0;
+            function animateConfetti() {
+                frame++;
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                pieces.forEach((p) => {
+                    p.x += p.vx;
+                    p.y += p.vy;
+                    p.rot += p.vRot;
+                    ctx.save();
+                    ctx.translate(p.x, p.y);
+                    ctx.rotate((p.rot * Math.PI) / 180);
+                    ctx.fillStyle = p.color;
+                    ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+                    ctx.restore();
+                });
+                if (frame < 180) {
+                    requestAnimationFrame(animateConfetti);
+                } else {
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                }
+            }
+            requestAnimationFrame(animateConfetti);
+        }
+
+        function loadQuestions() {
+            // Ưu tiên 1: Nạp dữ liệu đã được giáo viên đóng gói sẵn trong file trò chơi (.HTML)
+            if (window.__BUNDLED_GAME_DATA__ && Array.isArray(window.__BUNDLED_GAME_DATA__.questions) && window.__BUNDLED_GAME_DATA__.questions.length === TOTAL_TILES) {
+                questions = JSON.parse(JSON.stringify(window.__BUNDLED_GAME_DATA__.questions));
+                if (window.__BUNDLED_GAME_DATA__.roomCode) {
+                    currentRoomCode = window.__BUNDLED_GAME_DATA__.roomCode;
+                    const roomInput = document.getElementById("student-room-input");
+                    const roomDisp = document.getElementById("teacher-room-display");
+                    if (roomInput) roomInput.value = currentRoomCode;
+                    if (roomDisp) roomDisp.textContent = currentRoomCode;
+                }
+                return;
+            }
+            questions = JSON.parse(JSON.stringify(DEFAULT_QUESTIONS));
+        }
+
+        function loadBundledSecretImageIfAny() {
+            if (window.__BUNDLED_GAME_DATA__ && typeof window.__BUNDLED_GAME_DATA__.secretImage === "string" && window.__BUNDLED_GAME_DATA__.secretImage.length > 0) {
+                applySecretImage(window.__BUNDLED_GAME_DATA__.secretImage, true);
+            }
+        }
+
+        // Lưu tự động lần cuối nếu học sinh thoát trang hoặc chuyển tab đột ngột
+        window.addEventListener("visibilitychange", () => {
+            if (document.visibilityState === "hidden" && userRole === "student") {
+                syncStudentProgressToFirestore(true);
+            }
+        });
+
+        // =========================================================================
+        // ĐIỀU KHIỂN LƯỚI 15 MẢNH GHÉP & CỬA SỔ CÂU HỎI TRẮC NGHIỆM
+        // =========================================================================
+        function updateOpenedCounter() {
+            const count = openedTiles.filter(Boolean).length;
+            const openedEl = document.getElementById("opened-count");
+            if (openedEl) openedEl.textContent = count;
+        }
+
+        function renderTiles() {
+            const grid = document.getElementById("tiles-grid");
+            if (!grid) return;
+            grid.innerHTML = "";
+
+            for (let i = 0; i < TOTAL_TILES; i++) {
+                const tileContainer = document.createElement("div");
+                tileContainer.className = `tile-container relative w-full h-full cursor-pointer select-none ${openedTiles[i] ? "revealed" : ""}`;
+                tileContainer.dataset.index = i;
+
+                const colorGrad = TILE_COLORS[i % TILE_COLORS.length];
+                tileContainer.innerHTML = `
+                    <div class="tile-inner">
+                        <div class="tile-front w-full h-full bg-gradient-to-br ${colorGrad} flex flex-col items-center justify-center text-white border border-white/25">
+                            <span class="text-3xl sm:text-5xl md:text-6xl font-black drop-shadow-md">${i + 1}</span>
+                            <span class="text-[10px] sm:text-xs font-bold uppercase tracking-widest opacity-85 mt-1">Câu ${i + 1}</span>
+                        </div>
+                    </div>
+                `;
+
+                tileContainer.addEventListener("click", () => {
+                    if (!openedTiles[i]) {
+                        openQuestionModal(i);
+                    }
+                });
+
+                grid.appendChild(tileContainer);
+            }
+            updateOpenedCounter();
+        }
+
+        function openQuestionModal(tileIndex) {
+            activeTileIndex = tileIndex;
+            isAnsweringLocked = false;
+
+            const qData = questions[tileIndex] || DEFAULT_QUESTIONS[tileIndex];
+            document.getElementById("q-badge-number").textContent = tileIndex + 1;
+            document.getElementById("q-title-number").textContent = tileIndex + 1;
+            document.getElementById("q-text").innerHTML = formatChemicalHtml(qData.question);
+
+            const feedbackBanner = document.getElementById("feedback-banner");
+            feedbackBanner.classList.add("hidden");
+            feedbackBanner.textContent = "";
+
+            const optionsContainer = document.getElementById("options-container");
+            optionsContainer.innerHTML = "";
+            const labels = ["A", "B", "C", "D"];
+
+            qData.options.forEach((optText, optIdx) => {
+                const btn = document.createElement("button");
+                btn.type = "button";
+                btn.className = "option-btn w-full text-left p-4 rounded-2xl border-2 border-slate-200 bg-white hover:border-indigo-500 hover:bg-indigo-50/70 transition flex items-center gap-3.5 shadow-sm group";
+                btn.innerHTML = `
+                    <span class="opt-letter w-10 h-10 rounded-xl bg-indigo-100 text-indigo-800 group-hover:bg-indigo-600 group-hover:text-white font-black text-lg flex items-center justify-center shrink-0 transition">
+                        ${labels[optIdx]}
+                    </span>
+                    <span class="text-base sm:text-lg font-bold text-slate-800 leading-snug">
+                        ${formatChemicalHtml(optText)}
+                    </span>
+                `;
+                btn.addEventListener("click", () => handleAnswerSelection(optIdx, btn));
+                optionsContainer.appendChild(btn);
+            });
+
+            document.getElementById("question-modal").classList.remove("hidden");
+        }
+
+        function closeQuestionModal() {
+            document.getElementById("question-modal").classList.add("hidden");
+            activeTileIndex = null;
+            isAnsweringLocked = false;
+        }
+
+        async function handleAnswerSelection(selectedIdx, btnElement) {
+            if (isAnsweringLocked || activeTileIndex === null) return;
+            isAnsweringLocked = true;
+
+            const currentIdx = activeTileIndex;
+            const qData = questions[currentIdx] || DEFAULT_QUESTIONS[currentIdx];
+            const isCorrect = selectedIdx === qData.correctIndex;
+            const feedbackBanner = document.getElementById("feedback-banner");
+            const allButtons = document.querySelectorAll("#options-container .option-btn");
+
+            if (isCorrect) {
+                playSoundEffect("correct");
+                btnElement.classList.remove("border-slate-200", "bg-white", "hover:border-indigo-500", "hover:bg-indigo-50/70");
+                btnElement.classList.add("border-emerald-500", "bg-emerald-50", "ring-4", "ring-emerald-200");
+                const letterSpan = btnElement.querySelector(".opt-letter");
+                if (letterSpan) {
+                    letterSpan.className = "opt-letter w-10 h-10 rounded-xl bg-emerald-600 text-white font-black text-lg flex items-center justify-center shrink-0";
+                }
+
+                feedbackBanner.className = "mt-6 rounded-2xl p-4 text-center font-extrabold text-lg bg-emerald-100 text-emerald-800 border border-emerald-300";
+                feedbackBanner.textContent = "🎉 Chính xác! Mảnh ghép đang được lật mở...";
+                feedbackBanner.classList.remove("hidden");
+
+                // Cập nhật điểm số & trạng thái câu hỏi (nếu chưa từng trả lời sai trước đó thì cộng 10 điểm)
+                if (questionResults[currentIdx] !== "wrong") {
+                    questionResults[currentIdx] = "correct";
+                    if (userRole === "student") {
+                        studentProfile.score += 10;
+                        document.getElementById("student-score-display").textContent = studentProfile.score;
+                    }
+                } else {
+                    questionResults[currentIdx] = "correct";
+                }
+
+                openedTiles[currentIdx] = true;
+                updateOpenedCounter();
+
+                if (userRole === "student") {
+                    syncStudentProgressToFirestore(true);
+                }
+
+                setTimeout(() => {
+                    closeQuestionModal();
+                    const tileEl = document.querySelector(`.tile-container[data-index="${currentIdx}"]`);
+                    if (tileEl) {
+                        tileEl.classList.add("revealed");
+                    }
+
+                    // Kiểm tra nếu đã mở toàn bộ 15 mảnh ghép
+                    if (openedTiles.every(Boolean)) {
+                        if (userRole === "student") {
+                            stopStudentTimer();
+                            syncStudentProgressToFirestore(true);
+                        }
+                        playVictoryFanfare();
+                        launchConfetti();
+                        if (userRole === "student") {
+                            setTimeout(() => openStudentSummaryModal(), 650);
+                        } else {
+                            showToast("🎉 Chúc mừng! Toàn bộ bức tranh tri ân 20/11 đã được lật mở!");
+                        }
+                    }
+                }, 850);
+            } else {
+                playSoundEffect("wrong");
+                btnElement.classList.remove("border-slate-200", "bg-white");
+                btnElement.classList.add("border-rose-500", "bg-rose-50", "animate-shake");
+                const letterSpan = btnElement.querySelector(".opt-letter");
+                if (letterSpan) {
+                    letterSpan.className = "opt-letter w-10 h-10 rounded-xl bg-rose-600 text-white font-black text-lg flex items-center justify-center shrink-0";
+                }
+
+                if (questionResults[currentIdx] === "unanswered") {
+                    questionResults[currentIdx] = "wrong";
+                    if (userRole === "student") {
+                        syncStudentProgressToFirestore(true);
+                    }
+                }
+
+                feedbackBanner.className = "mt-6 rounded-2xl p-4 text-center font-extrabold text-base sm:text-lg bg-rose-100 text-rose-800 border border-rose-300";
+                feedbackBanner.textContent = "❌ Chưa chính xác rồi! Hãy thử chọn đáp án khác nhé.";
+                feedbackBanner.classList.remove("hidden");
+
+                // Mở khóa lại để học sinh được phép chọn lại đáp án đúng
+                allButtons.forEach((b) => {
+                    if (b !== btnElement) b.disabled = false;
+                });
+                isAnsweringLocked = false;
+            }
+        }
+
+        document.getElementById("btn-close-q-modal").addEventListener("click", closeQuestionModal);
+
+        const editorModal = document.getElementById("editor-modal");
+        const editorList = document.getElementById("editor-list");
+
+        document.getElementById("btn-edit-questions").addEventListener("click", () => {
+            renderEditorForms();
+            editorModal.classList.remove("hidden");
+        });
+
+        document.getElementById("btn-close-editor").addEventListener("click", () => editorModal.classList.add("hidden"));
+        document.getElementById("btn-cancel-editor").addEventListener("click", () => editorModal.classList.add("hidden"));
+
+        // =========================================================================
+        // BỘ PHÂN TÍCH TỰ ĐỘNG CÂU HỎI TỪ FILE WORD (.DOCX) HOẶC VĂN BẢN DÁN VÀO
+        // =========================================================================
+
+        const SUBSCRIPT_MAP = {
+            "0": "₀", "1": "₁", "2": "₂", "3": "₃", "4": "₄",
+            "5": "₅", "6": "₆", "7": "₇", "8": "₈", "9": "₉",
+            "+": "₊", "-": "₋", "=": "₌", "(": "₍", ")": "₎",
+            "n": "ₙ", "x": "ₓ", "y": "ᵧ"
+        };
+
+        const SUPERSCRIPT_MAP = {
+            "0": "⁰", "1": "¹", "2": "²", "3": "³", "4": "⁴",
+            "5": "⁵", "6": "⁶", "7": "⁷", "8": "⁸", "9": "⁹",
+            "+": "⁺", "-": "⁻", "=": "⁼", "(": "⁽", ")": "⁾",
+            "n": "ⁿ", "o": "°"
+        };
+
+        const REV_SUB_MAP = Object.fromEntries(Object.entries(SUBSCRIPT_MAP).map(([k, v]) => [v, k]));
+        const REV_SUP_MAP = Object.fromEntries(Object.entries(SUPERSCRIPT_MAP).map(([k, v]) => [v, k]));
+
+        function toSubscriptChars(str) {
+            return String(str).split("").map(ch => SUBSCRIPT_MAP[ch] || ch).join("");
+        }
+
+        function toSuperscriptChars(str) {
+            return String(str).split("").map(ch => SUPERSCRIPT_MAP[ch] || ch).join("");
+        }
+
+        // Hiển thị công thức hóa học bằng thẻ <sub>/<sup> sắc nét trên trình duyệt & điện thoại (tránh lỗi font thiếu ký tự Unicode)
+        function formatChemicalHtml(rawStr) {
+            let escaped = escapeHtml(rawStr || "");
+            // Chuyển các ký tự chỉ số dưới Unicode (₀-₉, ₙ...) thành <sub>...</sub>
+            escaped = escaped.replace(/([₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎ₙₓᵧ]+)/g, (match) => {
+                const normal = match.split("").map(c => REV_SUB_MAP[c] || c).join("");
+                return `<sub class="text-[0.75em] font-extrabold">${normal}</sub>`;
+            });
+            // Chuyển các ký tự chỉ số trên Unicode (⁰-⁹, ⁺, ⁻...) thành <sup>...</sup> (giữ nguyên dấu độ °)
+            escaped = escaped.replace(/([⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾ⁿ]+)/g, (match) => {
+                const normal = match.split("").map(c => REV_SUP_MAP[c] || c).join("");
+                return `<sup class="text-[0.75em] font-extrabold">${normal}</sup>`;
+            });
+            return escaped;
+        }
+
+        // Tự động chuẩn hóa các công thức hóa học phổ biến nếu người soạn gõ chữ thường (VD: C2H5OH -> C₂H₅OH, (C6H10O5)n -> (C₆H₁₀O₅)ₙ)
+        function formatChemicalFormulas(text) {
+            if (!text) return "";
+            let res = text;
+            // Chuẩn hóa công thức polymer có chữ n ở cuối ngoặc: (C6H10O5)n -> (C6H10O5)ₙ
+            res = res.replace(/(\)[0-9₀-₉]*)n\b/g, "$1ₙ");
+            // Chuẩn hóa công thức phân tử hóa học (ví dụ CH4, CO2, CaCO3, C6H12O6, H2SO4, Fe2O3...)
+            res = res.replace(/(?<![A-Za-z0-9])((?:[A-Z][a-z]?\d*|\([A-Za-z0-9₀-₉]+\)\d*)+)(?![A-Za-z0-9])/g, (match) => {
+                if (/[A-Z]/.test(match) && /\d/.test(match) && !/^[A-D]\d+$/.test(match)) {
+                    return match.replace(/([A-Za-z\)])(\d+)/g, (_, elem, num) => elem + toSubscriptChars(num));
+                }
+                return match;
+            });
+            return res;
+        }
+
+        /**
+         * Đệ quy trích xuất toàn bộ văn bản bên trong công thức Microsoft Equation / MathML (m:oMath)
+         * giúp không bao giờ bị mất công thức hóa học khi giáo viên gõ bằng Insert -> Equation trong Word
+         */
+        function extractMathNodeText(node) {
+            if (!node) return "";
+            const localName = node.localName || (node.nodeName ? node.nodeName.split(":").pop() : "");
+
+            if (localName === "t") {
+                return node.textContent || "";
+            }
+            if (localName === "sSub") {
+                // Chỉ số dưới trong Equation: m:e (cơ số) + m:sub (chỉ số dưới)
+                let base = "", sub = "";
+                for (const child of node.childNodes) {
+                    const cName = child.localName || (child.nodeName ? child.nodeName.split(":").pop() : "");
+                    if (cName === "e") base += extractMathNodeText(child);
+                    else if (cName === "sub") sub += extractMathNodeText(child);
+                }
+                return base + toSubscriptChars(sub.trim());
+            }
+            if (localName === "sSup") {
+                // Chỉ số trên trong Equation: m:e (cơ số) + m:sup (chỉ số trên)
+                let base = "", sup = "";
+                for (const child of node.childNodes) {
+                    const cName = child.localName || (child.nodeName ? child.nodeName.split(":").pop() : "");
+                    if (cName === "e") base += extractMathNodeText(child);
+                    else if (cName === "sup") sup += extractMathNodeText(child);
+                }
+                return base + toSuperscriptChars(sup.trim());
+            }
+            if (localName === "sSubSup") {
+                let base = "", sub = "", sup = "";
+                for (const child of node.childNodes) {
+                    const cName = child.localName || (child.nodeName ? child.nodeName.split(":").pop() : "");
+                    if (cName === "e") base += extractMathNodeText(child);
+                    else if (cName === "sub") sub += extractMathNodeText(child);
+                    else if (cName === "sup") sup += extractMathNodeText(child);
+                }
+                return base + toSubscriptChars(sub.trim()) + toSuperscriptChars(sup.trim());
+            }
+            if (localName === "f") {
+                // Phân số trong Equation: m:num / m:den
+                let num = "", den = "";
+                for (const child of node.childNodes) {
+                    const cName = child.localName || (child.nodeName ? child.nodeName.split(":").pop() : "");
+                    if (cName === "num") num += extractMathNodeText(child);
+                    else if (cName === "den") den += extractMathNodeText(child);
+                }
+                return `${num.trim()}/${den.trim()}`;
+            }
+
+            let combined = "";
+            for (const child of node.childNodes) {
+                combined += extractMathNodeText(child);
+            }
+            return combined;
+        }
+
+        // Duyệt tuần tự các node con của đoạn văn (<w:p>) để giữ đúng thứ tự chữ thường xen kẽ công thức Equation (m:oMath)
+        function extractParagraphContent(pNode) {
+            let lineText = "";
+
+            function walkNode(node) {
+                if (!node || node.nodeType !== 1) return;
+                const localName = node.localName || (node.nodeName ? node.nodeName.split(":").pop() : "");
+
+                // Gặp khối công thức Equation (m:oMath hoặc m:oMathPara) -> trích xuất trọn vẹn công thức hóa học
+                if (localName === "oMath" || localName === "oMathPara") {
+                    const mathText = extractMathNodeText(node);
+                    if (mathText) {
+                        lineText += mathText;
+                    }
+                    return;
+                }
+
+                // Gặp run văn bản thông thường (<w:r>)
+                if (localName === "r") {
+                    let runText = "";
+                    for (const child of node.childNodes) {
+                        const cName = child.localName || (child.nodeName ? child.nodeName.split(":").pop() : "");
+                        if (cName === "t" || cName === "delText") {
+                            runText += child.textContent || "";
+                        } else if (cName === "tab") {
+                            runText += " ";
+                        } else if (cName === "br") {
+                            runText += "\n";
+                        } else if (cName === "sym") {
+                            // Ký hiệu Symbol đặc biệt trong Word (mũi tên, độ, v.v.)
+                            const charHex = child.getAttribute("w:char") || child.getAttribute("char");
+                            if (charHex) {
+                                const code = parseInt(charHex, 16);
+                                if (!isNaN(code)) {
+                                    // Map một số mã phổ biến của font Symbol sang Unicode chuẩn
+                                    if (code === 0xF0AE || code === 0x2192) runText += "→";
+                                    else if (code === 0xF0AB || code === 0x21CC) runText += "⇌";
+                                    else if (code === 0xF0B0 || code === 0x00B0) runText += "°";
+                                    else if (code < 0xF000) runText += String.fromCharCode(code);
+                                }
+                            }
+                        }
+                    }
+
+                    if (!runText) return;
+
+                    let rPr = null;
+                    for (const child of node.childNodes) {
+                        const cName = child.localName || (child.nodeName ? child.nodeName.split(":").pop() : "");
+                        if (cName === "rPr") {
+                            rPr = child;
+                            break;
+                        }
+                    }
+
+                    let isHighlighted = false;
+                    let isUnderlined = false;
+                    if (rPr) {
+                        // 1. Chuyển đổi chuẩn chỉ số dưới (Subscript) và chỉ số trên (Superscript)
+                        const vertAlignEl = rPr.getElementsByTagName("w:vertAlign")[0];
+                        if (vertAlignEl) {
+                            const vVal = vertAlignEl.getAttribute("w:val");
+                            if (vVal === "subscript") {
+                                runText = toSubscriptChars(runText);
+                            } else if (vVal === "superscript") {
+                                runText = toSuperscriptChars(runText);
+                            }
+                        }
+
+                        // 2. Kiểm tra GẠCH CHÂN (w:u) - dấu hiệu chuẩn của đáp án đúng trong đề trắc nghiệm Word
+                        const uEl = rPr.getElementsByTagName("w:u")[0];
+                        if (uEl) {
+                            const uVal = (uEl.getAttribute("w:val") || "single").toLowerCase();
+                            if (uVal !== "none") {
+                                isUnderlined = true;
+                            }
+                        }
+
+                        // 3. Kiểm tra tô màu chữ nổi bật (đỏ, xanh, cam...), tô nền highlight, in đậm
+                        const colorEl = rPr.getElementsByTagName("w:color")[0];
+                        if (colorEl) {
+                            const val = (colorEl.getAttribute("w:val") || "").toUpperCase();
+                            const darkDefaults = ["AUTO", "000000", "0D0D0D", "111111", "1E293B", "222222", "333333", "444444"];
+                            if (val && !darkDefaults.includes(val)) {
+                                isHighlighted = true;
+                            }
+                        }
+
+                        const hlEl = rPr.getElementsByTagName("w:highlight")[0];
+                        if (hlEl && hlEl.getAttribute("w:val") !== "none") {
+                            isHighlighted = true;
+                        }
+
+                        const shdEl = rPr.getElementsByTagName("w:shd")[0];
+                        if (shdEl) {
+                            const fillVal = (shdEl.getAttribute("w:fill") || "").toUpperCase();
+                            if (fillVal && fillVal !== "AUTO" && fillVal !== "FFFFFF" && fillVal !== "F8FAFC") {
+                                isHighlighted = true;
+                            }
+                        }
+
+                        const bEl = rPr.getElementsByTagName("w:b")[0];
+                        if (bEl && bEl.getAttribute("w:val") !== "0" && bEl.getAttribute("w:val") !== "false" && /[A-Za-zÀ-ỹ0-9]/.test(runText)) {
+                            isHighlighted = true;
+                        }
+                    }
+
+                    if (isUnderlined) {
+                        lineText += `[[UL]]${runText}[[/UL]]`;
+                    } else if (isHighlighted) {
+                        lineText += `[[HL]]${runText}[[/HL]]`;
+                    } else {
+                        lineText += runText;
+                    }
+                    return;
+                }
+
+                // Tiếp tục duyệt các thẻ bọc như hyperlink, smartTag, sdt, ins...
+                for (const child of node.childNodes) {
+                    walkNode(child);
+                }
+            }
+
+            for (const child of pNode.childNodes) {
+                walkNode(child);
+            }
+            return lineText;
+        }
+
+        /**
+         * Đọc trực tiếp file .docx (dạng nén ZIP chứa word/document.xml) để trích xuất
+         * chuẩn công thức Equation, chỉ số trên/dưới hóa học và đánh dấu chính xác đáp án đúng
+         */
+        async function extractDocxWithHighlights(arrayBuffer) {
+            if (typeof JSZip === "undefined") {
+                if (typeof mammoth !== "undefined") {
+                    const res = await mammoth.extractRawText({ arrayBuffer });
+                    return { rawText: formatChemicalFormulas(res.value) };
+                }
+                throw new Error("Không tìm thấy thư viện đọc file Word.");
+            }
+
+            const zip = await JSZip.loadAsync(arrayBuffer);
+            const docXmlFile = zip.file("word/document.xml");
+            if (!docXmlFile) {
+                throw new Error("File .docx không hợp lệ (thiếu document.xml).");
+            }
+
+            const xmlText = await docXmlFile.async("string");
+            const parser = new DOMParser();
+            const xmlDoc = parser.parseFromString(xmlText, "application/xml");
+
+            const paragraphs = xmlDoc.getElementsByTagName("w:p");
+            const lines = [];
+
+            for (let pIdx = 0; pIdx < paragraphs.length; pIdx++) {
+                const lineText = extractParagraphContent(paragraphs[pIdx]);
+                if (lineText.trim()) {
+                    lines.push(lineText.trim());
+                }
+            }
+
+            return {
+                rawText: formatChemicalFormulas(lines.join("\n"))
+            };
+        }
+
+        function stripHighlightTags(str) {
+            return String(str).replace(/\[\[\/?(?:HL|UL)\]\]/g, "");
+        }
+
+        function parseQuestionsFromRawText(rawText) {
+            const normalized = rawText
+                .replace(/\r\n/g, "\n")
+                .replace(/\r/g, "\n")
+                .replace(/\u00A0/g, " ");
+
+            // Tách từng khối câu hỏi (hỗ trợ cả "Câu 1:", "Câu 1.", "Bài 1:", "1.", "1)" kể cả khi Word định dạng đậm/gạch chân hoặc đánh số tự động)
+            const questionHeaderRegex = /(?:^|\n)\s*(?:\[\[(?:HL|UL)\]\])?\s*(?:(?:Câu|Bài)\s*\d+\s*[:\.\-\)\/]?\s*|\d+\s*[\.\)]\s+)(?:\[\[\/(?:HL|UL)\]\])?\s*/gi;
+            const matches = [...normalized.matchAll(questionHeaderRegex)];
+
+            if (matches.length === 0) return [];
+
+            const parsedList = [];
+            for (let mIdx = 0; mIdx < matches.length; mIdx++) {
+                const startPos = matches[mIdx].index + matches[mIdx][0].length;
+                const endPos = mIdx + 1 < matches.length ? matches[mIdx + 1].index : normalized.length;
+                const block = normalized.slice(startPos, endPos).trim();
+                if (!block) continue;
+
+                // Tách dòng "Đáp án: X" nếu có ở cuối khối
+                let explicitCorrectIdx = -1;
+                const ansKeyMatch = block.match(/(?:^|\n)\s*(?:\[\[(?:HL|UL)\]\])?\s*(?:Đáp\s*án|ĐA|Key|Lời\s*giải)\s*[:\.\-]?\s*(?:\[\[(?:HL|UL)\]\])?\s*([A-D])/i);
+                if (ansKeyMatch) {
+                    explicitCorrectIdx = ["A", "B", "C", "D"].indexOf(ansKeyMatch[1].toUpperCase());
+                }
+                const blockWithoutKey = block.replace(/(?:^|\n)\s*(?:\[\[(?:HL|UL)\]\])?\s*(?:Đáp\s*án|ĐA|Key|Lời\s*giải)[\s\S]*$/i, "").trim();
+
+                // Tìm vị trí bắt đầu của các đáp án A, B, C, D trong khối câu hỏi
+                const optRegex = /(?:^|\n|\s{2,})\s*(?:\[\[(?:HL|UL)\]\])?\s*(\*?\s*[A-D])\s*[\.\)\:\-]\s*(?:\[\[\/(?:HL|UL)\]\])?\s*/g;
+                const optMatches = [...blockWithoutKey.matchAll(optRegex)];
+
+                if (optMatches.length >= 2) {
+                    const qText = stripHighlightTags(blockWithoutKey.slice(0, optMatches[0].index)).replace(/\s+/g, " ").trim();
+                    const opts = ["", "", "", ""];
+                    const underlineScores = [0, 0, 0, 0];
+                    const highlightScores = [0, 0, 0, 0];
+                    let starMarkedIdx = -1;
+
+                    for (let oIdx = 0; oIdx < optMatches.length; oIdx++) {
+                        const rawLabel = optMatches[oIdx][1].trim();
+                        const hasStar = rawLabel.startsWith("*");
+                        const letter = rawLabel.replace("*", "").trim().toUpperCase();
+                        const optIndex = ["A", "B", "C", "D"].indexOf(letter);
+                        if (optIndex === -1) continue;
+
+                        if (hasStar) starMarkedIdx = optIndex;
+
+                        const optStart = optMatches[oIdx].index + optMatches[oIdx][0].length;
+                        const optEnd = oIdx + 1 < optMatches.length ? optMatches[oIdx + 1].index : blockWithoutKey.length;
+                        const rawOptSegment = blockWithoutKey.slice(optStart, optEnd).trim();
+                        const fullOptWithPrefix = optMatches[oIdx][0] + rawOptSegment;
+
+                        const cleanOptVal = stripHighlightTags(rawOptSegment).replace(/\s+/g, " ").trim();
+                        if (!opts[optIndex]) {
+                            opts[optIndex] = cleanOptVal;
+
+                            // Tính điểm gạch chân [[UL]]...[[/UL]]
+                            let ulCharCount = 0;
+                            const ulMatches = [...fullOptWithPrefix.matchAll(/\[\[UL\]\]([\s\S]*?)\[\[\/UL\]\]/g)];
+                            ulMatches.forEach(m => { ulCharCount += m[1].trim().length; });
+                            underlineScores[optIndex] = ulCharCount;
+
+                            // Tính điểm tô màu / highlight / in đậm [[HL]]...[[/HL]]
+                            let hlCharCount = 0;
+                            const hlMatches = [...fullOptWithPrefix.matchAll(/\[\[HL\]\]([\s\S]*?)\[\[\/HL\]\]/g)];
+                            hlMatches.forEach(m => { hlCharCount += m[1].trim().length; });
+                            const totalLen = Math.max(1, cleanOptVal.length);
+                            highlightScores[optIndex] = hlCharCount > 0 ? (hlCharCount / totalLen) + (hlCharCount * 0.01) : 0;
+                        }
+                    }
+
+                    // Ưu tiên chọn đáp án đúng: (1) Phương án GẠCH CHÂN -> (2) Ghi rõ "Đáp án: X" -> (3) Dấu * -> (4) Tô màu/in đậm
+                    let finalCorrectIdx = 0;
+                    const maxUl = Math.max(...underlineScores);
+                    if (maxUl > 0) {
+                        finalCorrectIdx = underlineScores.indexOf(maxUl);
+                    } else if (explicitCorrectIdx !== -1) {
+                        finalCorrectIdx = explicitCorrectIdx;
+                    } else if (starMarkedIdx !== -1) {
+                        finalCorrectIdx = starMarkedIdx;
+                    } else {
+                        let maxScore = 0;
+                        for (let i = 0; i < 4; i++) {
+                            if (highlightScores[i] > maxScore) {
+                                maxScore = highlightScores[i];
+                                finalCorrectIdx = i;
+                            }
+                        }
+                    }
+
+                    parsedList.push({
+                        question: qText || "Nội dung câu hỏi",
+                        options: opts.map((o, i) => o || `Đáp án ${["A", "B", "C", "D"][i]}`),
+                        correctIndex: finalCorrectIdx
+                    });
+                }
+            }
+            return parsedList;
+        }
+
+        function persistQuestionsLocally() {
+            localQuestionsUpdatedAt = Date.now();
+        }
+
+        // Tạo mã phòng mới ngẫu nhiên & đồng bộ ngay câu hỏi + tranh + mã QR cho phòng mới
+        document.getElementById("btn-new-room-code").addEventListener("click", async () => {
+            const randomNum = Math.floor(100 + Math.random() * 900);
+            const newCode = `HOA${randomNum}`;
+            localSessionSubmissions.clear();
+            roomStudentsList = [];
+            syncRoomCodeAcrossAllUI(newCode);
+            renderTeacherDashboardTable();
+
+            // Tự động mở khung Mã QR & Link phòng mới để giáo viên gửi ngay cho học sinh
+            document.getElementById("room-qr-share-box").classList.remove("hidden");
+
+            const authed = await ensureFirebaseAuthenticated();
+            if (authed && currentUser && db) {
+                // Đẩy bộ câu hỏi & bức tranh bí mật hiện tại sang phòng mới này
+                await saveQuestionBankToCloud(`Bộ đề phòng ${newCode}`);
+                if (currentSecretImageData) {
+                    await syncSecretImageToRoomFirestore(currentSecretImageData);
+                }
+                subscribeToRoomData(newCode);
+            }
+            showToast(`🎲 Đã tạo phòng mới ${newCode} & cập nhật Mã QR mới!`);
+        });
+
+        // Xóa dữ liệu phòng hiện tại (kèm hộp xác nhận nội bộ)
+        document.getElementById("btn-clear-room-data").addEventListener("click", () => {
+            document.getElementById("confirm-room-label").textContent = currentRoomCode;
+            document.getElementById("confirm-clear-box").classList.remove("hidden");
+        });
+
+        document.getElementById("btn-confirm-clear-no").addEventListener("click", () => {
+            document.getElementById("confirm-clear-box").classList.add("hidden");
+        });
+
+        document.getElementById("btn-confirm-clear-yes").addEventListener("click", async () => {
+            document.getElementById("confirm-clear-box").classList.add("hidden");
+            await resetScoreboardAndStartNewRound(false);
+        });
+
+        // Sự kiện tải lên file Word (.docx)
+        document.getElementById("upload-word-input").addEventListener("change", async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const statusEl = document.getElementById("word-import-status");
+            statusEl.textContent = "⏳ Đang đọc và chuẩn hóa công thức từ file Word...";
+
+            try {
+                const arrayBuffer = await file.arrayBuffer();
+                const { rawText } = await extractDocxWithHighlights(arrayBuffer);
+                document.getElementById("word-paste-textarea").value = stripHighlightTags(rawText);
+
+                const imported = parseQuestionsFromRawText(rawText);
+                if (imported.length === 0) {
+                    statusEl.textContent = "⚠️ Không nhận diện được câu hỏi. Vui lòng kiểm tra định dạng Câu 1... A. B. C. D.";
+                    return;
+                }
+
+                imported.forEach((item, idx) => {
+                    if (idx < TOTAL_TILES) questions[idx] = item;
+                });
+
+                persistQuestionsLocally();
+                const savedCloud = await saveQuestionBankToCloud(file.name);
+
+                // Đóng lại các mảnh ghép để sẵn sàng chơi với bộ câu hỏi mới từ Word
+                openedTiles = new Array(TOTAL_TILES).fill(false);
+                renderTiles();
+
+                renderEditorForms();
+                if (savedCloud) {
+                    statusEl.textContent = `☁️ Đã lưu vĩnh viễn ${imported.length} câu hỏi từ "${file.name}" lên đám mây & đồng bộ phòng ${currentRoomCode}!`;
+                    showToast(`☁️ Đã lưu vĩnh viễn ${imported.length} câu hỏi từ Word!`);
+                } else {
+                    statusEl.textContent = `✅ Đã nạp ${imported.length} câu hỏi từ "${file.name}"!`;
+                    showToast(`📄 Đã nạp ${imported.length} câu hỏi từ Word!`);
+                }
+            } catch (err) {
+                console.error("Lỗi đọc file Word:", err);
+                statusEl.textContent = "⚠️ File Word không hợp lệ (chỉ hỗ trợ đuôi .docx).";
+            } finally {
+                e.target.value = "";
+            }
+        });
+
+        // Sự kiện phân tích văn bản dán từ Word và cập nhật ngay
+        document.getElementById("btn-parse-word-text").addEventListener("click", async () => {
+            const rawText = document.getElementById("word-paste-textarea").value.trim();
+            const statusEl = document.getElementById("word-import-status");
+
+            if (!rawText) {
+                statusEl.textContent = "⚠️ Vui lòng dán nội dung câu hỏi từ Word vào khung trước!";
+                return;
+            }
+
+            const imported = parseQuestionsFromRawText(rawText);
+            if (imported.length === 0) {
+                statusEl.textContent = "⚠️ Không tìm thấy mẫu 'Câu 1: ... A. ... B. ... C. ... D. ...'.";
+                return;
+            }
+
+            imported.forEach((item, idx) => {
+                if (idx < TOTAL_TILES) questions[idx] = item;
+            });
+
+            persistQuestionsLocally();
+            const savedCloud = await saveQuestionBankToCloud("Bộ câu hỏi dán trực tiếp");
+
+            openedTiles = new Array(TOTAL_TILES).fill(false);
+            renderTiles();
+
+            renderEditorForms();
+            statusEl.textContent = savedCloud
+                ? `☁️ Đã lưu vĩnh viễn ${imported.length} câu hỏi lên đám mây!`
+                : `✅ Đã cập nhật tự động ${imported.length} câu hỏi!`;
+            showToast(`⚡ Đã lưu ${imported.length} câu hỏi mới vào hệ thống!`);
+        });
+
+        // Đồng bộ bộ câu hỏi của giáo viên lên Firestore của phòng để học sinh nhận câu hỏi mới
+        async function syncQuestionsToRoomFirestore() {
+            return await saveQuestionBankToCloud("Bộ câu hỏi hiện tại");
+        }
+
+        document.getElementById("btn-save-questions").addEventListener("click", async () => {
+            const updatedQuestions = [];
+
+            for (let idx = 0; idx < TOTAL_TILES; idx++) {
+                const qText = document.getElementById(`q-input-${idx}`).value.trim() || `Câu hỏi số ${idx + 1}`;
+                const opts = [];
+                for (let optIdx = 0; optIdx < 4; optIdx++) {
+                    const val = document.getElementById(`opt-${idx}-${optIdx}`).value.trim() || `Đáp án ${optIdx + 1}`;
+                    opts.push(val);
+                }
+
+                const checkedRadio = document.querySelector(`input[name="correct-${idx}"]:checked`);
+                const correctIndex = checkedRadio ? parseInt(checkedRadio.value, 10) : 0;
+
+                updatedQuestions.push({
+                    question: qText,
+                    options: opts,
+                    correctIndex: correctIndex
+                });
+            }
+
+            questions = updatedQuestions;
+            persistQuestionsLocally();
+            const cloudSaved = await saveQuestionBankToCloud(`Bộ đề phòng ${currentRoomCode}`);
+
+            openedTiles = new Array(TOTAL_TILES).fill(false);
+            renderTiles();
+
+            editorModal.classList.add("hidden");
+            if (cloudSaved) {
+                showToast(`☁️ Đã lưu vĩnh viễn & đồng bộ 15 câu hỏi cho phòng ${currentRoomCode}!`);
+            } else {
+                showToast("💾 Đã cập nhật bộ 15 câu hỏi mới!");
+            }
+        });
+
+        function renderEditorForms() {
+            const cardsContainer = document.getElementById("editor-cards-container");
+            cardsContainer.innerHTML = "";
+            const labels = ["A", "B", "C", "D"];
+
+            questions.forEach((q, idx) => {
+                const card = document.createElement("div");
+                card.className = "bg-white p-5 rounded-2xl border border-slate-200 shadow-sm";
+
+                let optionsInputsHtml = "";
+                for (let optIdx = 0; optIdx < 4; optIdx++) {
+                    const isChecked = q.correctIndex === optIdx ? "checked" : "";
+                    optionsInputsHtml += `
+                        <div class="flex items-center gap-2.5">
+                            <input type="radio" name="correct-${idx}" value="${optIdx}" ${isChecked} 
+                                class="w-5 h-5 text-emerald-600 focus:ring-emerald-500 cursor-pointer" title="Chọn làm đáp án đúng">
+                            <span class="font-bold text-slate-700 w-6">${labels[optIdx]}.</span>
+                            <input type="text" id="opt-${idx}-${optIdx}" value="${escapeHtml(q.options[optIdx])}" 
+                                class="flex-1 px-3 py-2 rounded-xl border border-slate-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none text-sm font-medium"
+                                placeholder="Nhập đáp án ${labels[optIdx]}">
+                        </div>
+                    `;
+                }
+
+                card.innerHTML = `
+                    <div class="flex items-center justify-between mb-3">
+                        <span class="bg-indigo-100 text-indigo-800 font-extrabold px-3 py-1 rounded-lg text-sm">
+                            Mảnh ghép số ${idx + 1}
+                        </span>
+                        <span class="text-xs text-slate-500 font-medium">Tích chọn nút tròn bên trái đáp án đúng</span>
+                    </div>
+                    <div class="mb-3">
+                        <label class="block text-xs font-bold text-slate-600 uppercase mb-1">Nội dung câu hỏi:</label>
+                        <textarea id="q-input-${idx}" rows="2" 
+                            class="w-full px-3.5 py-2 rounded-xl border border-slate-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none text-sm font-semibold text-slate-800">${escapeHtml(q.question)}</textarea>
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        ${optionsInputsHtml}
+                    </div>
+                `;
+                cardsContainer.appendChild(card);
+            });
+        }
+
+        document.getElementById("btn-restore-defaults").addEventListener("click", async () => {
+            questions = JSON.parse(JSON.stringify(DEFAULT_QUESTIONS));
+            persistQuestionsLocally();
+            await saveQuestionBankToCloud("15 câu hỏi Hóa học mặc định");
+            renderEditorForms();
+            showToast("↩️ Đã khôi phục & lưu 15 câu hỏi Hóa học mặc định!");
+        });
+
+        let toastTimeout = null;
+        function showToast(message) {
+            const toast = document.getElementById("toast-message");
+            const toastText = document.getElementById("toast-text");
+            toastText.textContent = message;
+
+            toast.classList.remove("translate-y-20", "opacity-0");
+            if (toastTimeout) clearTimeout(toastTimeout);
+
+            toastTimeout = setTimeout(() => {
+                toast.classList.add("translate-y-20", "opacity-0");
+            }, 3200);
+        }
+
+        function escapeHtml(str) {
+            return String(str)
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;");
+        }
+
+        // Khởi chạy ứng dụng
+        window.addEventListener("DOMContentLoaded", () => {
+            loadQuestions();
+            loadBundledSecretImageIfAny();
+            loadSavedSecretImage();
+            renderTiles();
+            startRoundCountdownTicker();
+            initFirebaseService();
+        });
+    </script>
+</body>
+</html>
